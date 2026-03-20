@@ -1,0 +1,5 @@
+{
+  "name": "DocFormat Pro",
+  "description": "A client-side document automation tool that formats Word documents to academic standards automatically.",
+  "requestFramePermissions": []
+}
