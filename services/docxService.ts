@@ -34,6 +34,34 @@ const DEFAULT_OPTIONS: DocxOptions = {
   table: { rowHeight: 0.8 }
 };
 
+// Helper to parse and normalize bad document titles
+const normalizeTitleText = (rawText: string): { docType: string, summary: string } | null => {
+    // Only match if it starts with the exact keywords
+    const keywords = ["KẾ HOẠCH", "BÁO CÁO", "BIÊN BẢN", "TỜ TRÌNH", "GIẤY MỜI", "QUYẾT ĐỊNH", "THÔNG BÁO"];
+    const regex = new RegExp(`^\\s*(${keywords.join('|')})\\s*(.*)$`, 'i');
+    const match = rawText.match(regex);
+
+    if (!match) return null;
+
+    const docType = match[1].toUpperCase();
+    let summary = match[2].trim();
+
+    if (!summary || summary.length < 3) return null; // Already separated or too short
+
+    // Clean up leading characters
+    summary = summary.replace(/^[:-]\s*/, '').trim();
+
+    // Fix date formats
+    summary = summary.replace(/(?:-|–)?\s*tháng\s+(\d{1,2})(?:\/|-)(\d{4})/gi, 'tháng $1 năm $2');
+    const currentYear = new Date().getFullYear();
+    summary = summary.replace(/(?:-|–)?\s*tháng\s+(\d{1,2})(?!\s*năm|\/|-)/gi, `tháng $1 năm ${currentYear}`);
+
+    // Sentence case
+    summary = summary.charAt(0).toUpperCase() + summary.slice(1).toLowerCase();
+
+    return { docType, summary };
+};
+
 export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPTIONS): Promise<ProcessResult> => {
   const logs: string[] = [];
   try {
@@ -243,8 +271,10 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
     }
 
     // Apply Formatting Loop
+    let hasNormalizedTitle = false;
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
+      const pIndex = i + 1;
       const isTable = isTableParagraph(p);
       const pPr = getOrCreate(p, "pPr");
 
@@ -344,6 +374,103 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
           const szCs = getOrCreate(rPr, "szCs");
           szCs.setAttributeNS(W_NS, "w:val", String(targetSize));
       }
+
+      // --- SAFELY INJECT TITLE DETECTION HERE ---
+      const runsForTitle = Array.from(p.getElementsByTagNameNS(W_NS, "r"));
+      let pText = "";
+      runsForTitle.forEach(r => {
+          const tNodes = r.getElementsByTagNameNS(W_NS, "t");
+          if (tNodes.length > 0) pText += tNodes[0].textContent || "";
+      });
+
+      // CRITICAL SAFETY LOCK: Only check first 10 paragraphs, stop if already found
+      if (!hasNormalizedTitle && pIndex <= 10 && pText.length > 0 && pText.length < 150) {
+          // To avoid false positives in body text, ensure the text is somewhat "title-like" 
+          // (e.g. it is entirely uppercase or starts with uppercase doc type)
+          const isLikelyTitle = pText.toUpperCase().startsWith("KẾ HOẠCH") || 
+                                pText.toUpperCase().startsWith("BÁO CÁO") || 
+                                pText.toUpperCase().startsWith("BIÊN BẢN") || 
+                                pText.toUpperCase().startsWith("TỜ TRÌNH") ||
+                                pText.toUpperCase().startsWith("GIẤY MỜI") ||
+                                pText.toUpperCase().startsWith("QUYẾT ĐỊNH");
+          
+          if (isLikelyTitle) {
+              let combinedText = pText;
+              let nextP = p.nextSibling;
+              let extraParagraphs: Element[] = [];
+
+              // Look ahead up to 2 paragraphs for split titles (usually short and ALL CAPS)
+              for (let i = 0; i < 2; i++) {
+                  if (nextP && nextP.nodeName === "w:p") {
+                      let nextText = "";
+                      const nextRuns = Array.from((nextP as Element).getElementsByTagNameNS(W_NS, "r"));
+                      nextRuns.forEach(r => {
+                          const tNodes = r.getElementsByTagNameNS(W_NS, "t");
+                          if (tNodes.length > 0) nextText += tNodes[0].textContent || "";
+                      });
+
+                      const trimmedNext = nextText.trim();
+                      // If it's short and completely uppercase, it's a continuation of the title
+                      const isAllCaps = trimmedNext.length > 0 && trimmedNext === trimmedNext.toUpperCase();
+                      
+                      if (trimmedNext.length > 0 && trimmedNext.length < 120 && isAllCaps) {
+                          combinedText += " " + trimmedNext;
+                          extraParagraphs.push(nextP as Element);
+                          nextP = nextP.nextSibling;
+                      } else {
+                          break; // Stop looking if it's normal body text
+                      }
+                  } else {
+                      break;
+                  }
+              }
+
+              const normalized = normalizeTitleText(combinedText);
+              if (normalized) {
+                  hasNormalizedTitle = true; // LOCK ENGAGED
+                  
+                  // Delete the extra paragraphs we just merged
+                  extraParagraphs.forEach(ep => ep.parentNode?.removeChild(ep));
+
+                  // Clear original paragraph runs
+                  runsForTitle.forEach(r => p.removeChild(r));
+
+                  // 1. DocType Run (e.g., "BIÊN BẢN")
+                  const rType = doc.createElementNS(W_NS, "w:r");
+                  const rPrType = getOrCreate(rType, "w:rPr");
+                  rPrType.appendChild(doc.createElementNS(W_NS, "w:b")); 
+                  const szType = getOrCreate(rPrType, "w:sz");
+                  szType.setAttributeNS(W_NS, "w:val", "28"); 
+                  const tType = doc.createElementNS(W_NS, "w:t");
+                  tType.textContent = normalized.docType;
+                  rType.appendChild(tType);
+                  p.appendChild(rType);
+
+                  // 2. Summary Paragraph (e.g., "Triển khai kế hoạch sinh hoạt...")
+                  const newP = doc.createElementNS(W_NS, "w:p");
+                  const newPPr = getOrCreate(newP, "w:pPr");
+                  const jcNew = getOrCreate(newPPr, "w:jc");
+                  jcNew.setAttributeNS(W_NS, "w:val", "center"); 
+                  
+                  const rSum = doc.createElementNS(W_NS, "w:r");
+                  const rPrSum = getOrCreate(rSum, "w:rPr");
+                  rPrSum.appendChild(doc.createElementNS(W_NS, "w:b")); 
+                  const szSum = getOrCreate(rPrSum, "w:sz");
+                  szSum.setAttributeNS(W_NS, "w:val", "28"); 
+                  
+                  const tSum = doc.createElementNS(W_NS, "w:t");
+                  tSum.textContent = normalized.summary;
+                  rSum.appendChild(tSum);
+                  newP.appendChild(rSum);
+
+                  if (p.nextSibling) {
+                      p.parentNode?.insertBefore(newP, p.nextSibling);
+                  } else {
+                      p.parentNode?.appendChild(newP);
+                  }
+              }
+          }
+      }
     }
 
     // --- STEP 4: Table Row Properties ---
@@ -365,14 +492,33 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         }
     }
     
-    // --- STEP 5: Insert Header Template (If Selected) ---
+    // --- STEP 5: Insert Header and Signature Templates ---
     if (options.headerType !== HeaderType.NONE && body) {
-        logs.push(`Inserting Header Template: ${options.headerType}...`);
+        logs.push("Inserting Standard Header & Signature Templates...");
+        
+        // Insert Header at the top
         const headerTable = createHeaderTemplate(doc, options);
         if (body.firstChild) {
             body.insertBefore(headerTable, body.firstChild);
         } else {
             body.appendChild(headerTable);
+        }
+
+        // Insert Signature Block at the end (safely before final sectPr)
+        const sectPrs = body.getElementsByTagNameNS(W_NS, "sectPr");
+        const lastSectPr = sectPrs.length > 0 ? sectPrs[sectPrs.length - 1] : null;
+        
+        // Add a blank paragraph before the signature block for spacing
+        const blankP = doc.createElementNS(W_NS, "w:p");
+        
+        const signatureBlock = createSignatureBlock(doc, options);
+        
+        if (lastSectPr && lastSectPr.parentNode === body) {
+            body.insertBefore(blankP, lastSectPr);
+            body.insertBefore(signatureBlock, lastSectPr);
+        } else {
+            body.appendChild(blankP);
+            body.appendChild(signatureBlock);
         }
     }
 
@@ -380,6 +526,86 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
     // Executed last to ensure everything, including inserted templates, is standardized.
     logs.push("Step 6: Performing Deep Font Formatting (Force Times New Roman)...");
     forceFontApplication(doc, options.font.family);
+
+    // --- STEP 7: AUTO PAGE NUMBERING (Different First Page, Top Center) ---
+    logs.push("Configuring Auto Page Numbering (Top Center, starting from Page 2)...");
+    
+    // 7.1 Create the header XML file with a Page Field
+    const headerXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+        <w:p>
+            <w:pPr>
+                <w:jc w:val="center"/>
+            </w:pPr>
+            <w:r>
+                <w:fldChar w:fldCharType="begin"/>
+            </w:r>
+            <w:r>
+                <w:instrText xml:space="preserve"> PAGE </w:instrText>
+            </w:r>
+            <w:r>
+                <w:fldChar w:fldCharType="separate"/>
+            </w:r>
+            <w:r>
+                <w:rPr><w:noProof/></w:rPr>
+                <w:t>2</w:t>
+            </w:r>
+            <w:r>
+                <w:fldChar w:fldCharType="end"/>
+            </w:r>
+        </w:p>
+    </w:hdr>`;
+    zip.file("word/header_custom.xml", headerXml);
+
+    // 7.2 Update [Content_Types].xml to register the new header part
+    let contentTypesXml = await zip.file("[Content_Types].xml")?.async("string");
+    if (contentTypesXml && !contentTypesXml.includes('PartName="/word/header_custom.xml"')) {
+        contentTypesXml = contentTypesXml.replace(
+            '</Types>',
+            '<Override PartName="/word/header_custom.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>'
+        );
+        zip.file("[Content_Types].xml", contentTypesXml);
+    }
+
+    // 7.3 Update document.xml.rels to link the header part
+    let relsXml = await zip.file("word/_rels/document.xml.rels")?.async("string");
+    if (relsXml && !relsXml.includes('Target="header_custom.xml"')) {
+        relsXml = relsXml.replace(
+            '</Relationships>',
+            '<Relationship Id="rIdCustomHdr" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header_custom.xml"/></Relationships>'
+        );
+        zip.file("word/_rels/document.xml.rels", relsXml);
+    }
+
+    // 7.4 Update Document sections (sectPr)
+    const sectPrs = Array.from(doc.getElementsByTagNameNS(W_NS, "sectPr"));
+    const R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    
+    for (const sPr of sectPrs) {
+        // A. Enable "Different First Page" (w:titlePg) so page 1 ignores the default header
+        getOrCreate(sPr, "titlePg");
+        
+        // B. Clean up existing default headers to avoid conflict
+        const headerRefs = Array.from(sPr.getElementsByTagNameNS(W_NS, "headerReference"));
+        for (const hr of headerRefs) {
+            if (hr.getAttributeNS(W_NS, "type") === "default") {
+                sPr.removeChild(hr);
+            }
+        }
+        
+        // C. Link the custom header to "default" (which means page 2 onwards)
+        const newHdrRef = doc.createElementNS(W_NS, "w:headerReference");
+        newHdrRef.setAttributeNS(W_NS, "w:type", "default");
+        newHdrRef.setAttributeNS(R_NS, "r:id", "rIdCustomHdr");
+        
+        // Ensure headerReference is inserted before certain elements in sectPr for strict OOXML validation
+        // Simply appending it usually works in modern Word, but putting it at the top of sectPr is safer
+        if (sPr.firstChild) {
+            sPr.insertBefore(newHdrRef, sPr.firstChild);
+        } else {
+            sPr.appendChild(newHdrRef);
+        }
+    }
 
     logs.push("Rebuilding DOCX file...");
     const serializer = new XMLSerializer();
@@ -473,7 +699,6 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         const jcTbl = getOrCreate(tblPr, "w:jc");
         jcTbl.setAttributeNS(W_NS, "w:val", "center");
         
-        // CRITICAL: AutoFit forces the table to shrink to exact text width
         const tblLayout = getOrCreate(tblPr, "w:tblLayout");
         tblLayout.setAttributeNS(W_NS, "w:type", "autofit");
 
@@ -488,7 +713,6 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         tcW.setAttributeNS(W_NS, "w:w", "0");
         tcW.setAttributeNS(W_NS, "w:type", "auto");
 
-        // Thin 1/4pt Bottom border
         const tcBorders = getOrCreate(tcPr, "w:tcBorders");
         const bottom = getOrCreate(tcBorders, "w:bottom");
         bottom.setAttributeNS(W_NS, "w:val", "single");
@@ -496,7 +720,6 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         bottom.setAttributeNS(W_NS, "w:space", "0");
         bottom.setAttributeNS(W_NS, "w:color", "000000");
 
-        // Remove cell margins so border hugs the text
         const tcMar = getOrCreate(tcPr, "w:tcMar");
         ["top", "bottom", "left", "right"].forEach(side => {
             const mar = getOrCreate(tcMar, `w:${side}`);
@@ -504,15 +727,27 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
             mar.setAttributeNS(W_NS, "w:type", "dxa");
         });
 
+        // Create paragraph inside the cell with centered alignment
         const p = createElement("w:p");
         tc.appendChild(p);
+        
         const pPr = getOrCreate(p, "w:pPr");
+        const jcP = getOrCreate(pPr, "w:jc");
+        jcP.setAttributeNS(W_NS, "w:val", "center");
+        
+        // CRITICAL SPACING FIX FOR Tightness
+        // Explicitly set 0pt spacing before/after and a tight 12pt line height
+        // We MUST use 'exact' lineRule to strictly override inheriting generic spacing
         const spacing = getOrCreate(pPr, "w:spacing");
         spacing.setAttributeNS(W_NS, "w:before", "0");
         spacing.setAttributeNS(W_NS, "w:after", "0");
+        spacing.setAttributeNS(W_NS, "w:line", "240"); // Explicit 12 twips (single) spacing
+        spacing.setAttributeNS(W_NS, "w:lineRule", "exact"); // Force exact rule
 
+        // Create the text run with styling
         const r = createElement("w:r");
         p.appendChild(r);
+        
         const rPr = getOrCreate(r, "w:rPr");
         if (isBold) rPr.appendChild(createElement("w:b"));
         if (isItalic) rPr.appendChild(createElement("w:i"));
@@ -568,10 +803,10 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
     tc2W.setAttributeNS(W_NS, "w:w", "5400");
     tc2W.setAttributeNS(W_NS, "w:type", "dxa");
 
-    const today = new Date();
-    const day = String(today.getDate()).padStart(2, '0');
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const year = today.getFullYear();
+    const docDate = options.documentDate ? new Date(options.documentDate) : new Date();
+    const day = String(docDate.getDate()).padStart(2, '0');
+    const month = String(docDate.getMonth() + 1).padStart(2, '0');
+    const year = docDate.getFullYear();
     const currentDateStr = `Ea Kar, ngày ${day} tháng ${month} năm ${year}`;
 
     switch (options.headerType) {
@@ -619,6 +854,110 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
             tc2.appendChild(createStyledP("", false, false));
             // Updated date text
             tc2.appendChild(createStyledP(currentDateStr, false, true));
+            break;
+    }
+
+    return tbl;
+};
+
+// Helper to create the Signature Block at the end of the document
+const createSignatureBlock = (doc: Document, options: DocxOptions): Element => {
+    const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const createElement = (tagName: string) => doc.createElementNS(W_NS, tagName);
+    const getOrCreate = (parent: Element, tagName: string): Element => {
+      let child = parent.getElementsByTagNameNS(W_NS, tagName)[0];
+      if (!child) {
+        child = createElement(tagName);
+        parent.appendChild(child);
+      }
+      return child;
+    };
+
+    // Special tight-spacing P creator for the signature block
+    const createTightP = (text: string, isBold: boolean, isItalic: boolean, align: string) => {
+        const p = createElement("w:p");
+        const pPr = getOrCreate(p, "w:pPr");
+        
+        const jc = getOrCreate(pPr, "w:jc");
+        jc.setAttributeNS(W_NS, "w:val", align);
+        
+        const spacing = getOrCreate(pPr, "w:spacing");
+        spacing.setAttributeNS(W_NS, "w:before", "0");
+        spacing.setAttributeNS(W_NS, "w:after", "0");
+        spacing.setAttributeNS(W_NS, "w:line", "240"); // Explicit 12 twips spacing
+        spacing.setAttributeNS(W_NS, "w:lineRule", "auto"); // Single Spacing is correct here
+
+        const r = createElement("w:r");
+        p.appendChild(r);
+        const rPr = getOrCreate(r, "w:rPr");
+        
+        const sz = getOrCreate(rPr, "w:sz");
+        sz.setAttributeNS(W_NS, "w:val", String(options.font.sizeTable * 2)); // Use table font size (13pt)
+        const szCs = getOrCreate(rPr, "w:szCs");
+        szCs.setAttributeNS(W_NS, "w:val", String(options.font.sizeTable * 2));
+
+        if (isBold) rPr.appendChild(createElement("w:b"));
+        if (isItalic) rPr.appendChild(createElement("w:i"));
+
+        const t = createElement("w:t");
+        t.textContent = text;
+        r.appendChild(t);
+        return p;
+    };
+
+    const tbl = createElement("w:tbl");
+    const tblPr = getOrCreate(tbl, "w:tblPr");
+    const tblBorders = getOrCreate(tblPr, "w:tblBorders");
+    ["top", "left", "bottom", "right", "insideH", "insideV"].forEach(side => {
+        const border = getOrCreate(tblBorders, `w:${side}`);
+        border.setAttributeNS(W_NS, "w:val", "none");
+    });
+    
+    // 1. CRITICAL FIX: Set Table Width to 100% (5000 pct)
+    const tblW = getOrCreate(tblPr, "w:tblW");
+    tblW.setAttributeNS(W_NS, "w:w", "5000");
+    tblW.setAttributeNS(W_NS, "w:type", "pct"); // Changed from dxa to pct
+
+    const tr = createElement("w:tr");
+    tbl.appendChild(tr);
+
+    // --- Left Cell (Nơi nhận) ---
+    const tc1 = createElement("w:tc");
+    tr.appendChild(tc1);
+    const tc1Pr = getOrCreate(tc1, "w:tcPr");
+    
+    // 2. CRITICAL FIX: Set Left Cell to 40% width (2000 pct)
+    const tc1W = getOrCreate(tc1Pr, "w:tcW");
+    tc1W.setAttributeNS(W_NS, "w:w", "2000");
+    tc1W.setAttributeNS(W_NS, "w:type", "pct");
+    
+    // Tightened P instances
+    tc1.appendChild(createTightP("Nơi nhận:", true, true, "left"));
+    tc1.appendChild(createTightP("- Như trên;", false, false, "left"));
+    tc1.appendChild(createTightP("- Lưu: VT...", false, false, "left"));
+
+    // --- Right Cell (Chữ ký) ---
+    const tc2 = createElement("w:tc");
+    tr.appendChild(tc2);
+    const tc2Pr = getOrCreate(tc2, "w:tcPr");
+    
+    // 3. CRITICAL FIX: Set Right Cell to 60% width (3000 pct)
+    const tc2W = getOrCreate(tc2Pr, "w:tcW");
+    tc2W.setAttributeNS(W_NS, "w:w", "3000");
+    tc2W.setAttributeNS(W_NS, "w:type", "pct");
+
+    switch (options.headerType) {
+        case 'PARTY':
+            tc2.appendChild(createTightP("T/M CHI BỘ", true, false, "center"));
+            // Removed createTightP("", false, false, "center")
+            tc2.appendChild(createTightP("BÍ THƯ", true, false, "center")); // Tight titles
+            break;
+        case 'DEPARTMENT':
+            tc2.appendChild(createTightP("TỔ TRƯỞNG", true, false, "center"));
+            break;
+        case 'SCHOOL':
+        default:
+            tc2.appendChild(createTightP("HIỆU TRƯỞNG", true, false, "center"));
             break;
     }
 
