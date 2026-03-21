@@ -468,12 +468,12 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
     // Helper to create a shrink-to-fit nested table with a thin 1/4pt bottom border
     const createExactLineTable = (text: string, isBold: boolean, isItalic: boolean): Element => {
         const tbl = createElement("w:tbl");
-
         const tblPr = getOrCreate(tbl, "w:tblPr");
+        
         const jcTbl = getOrCreate(tblPr, "w:jc");
         jcTbl.setAttributeNS(W_NS, "w:val", "center");
         
-        // AutoFit layout forces table to shrink to text width
+        // CRITICAL: AutoFit forces the table to shrink to exact text width
         const tblLayout = getOrCreate(tblPr, "w:tblLayout");
         tblLayout.setAttributeNS(W_NS, "w:type", "autofit");
 
@@ -484,12 +484,11 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         tr.appendChild(tc);
         const tcPr = getOrCreate(tc, "w:tcPr");
 
-        // Auto width
         const tcW = getOrCreate(tcPr, "w:tcW");
         tcW.setAttributeNS(W_NS, "w:w", "0");
         tcW.setAttributeNS(W_NS, "w:type", "auto");
 
-        // Bottom border - 1/4pt (sz=2), NOT bold
+        // Thin 1/4pt Bottom border
         const tcBorders = getOrCreate(tcPr, "w:tcBorders");
         const bottom = getOrCreate(tcBorders, "w:bottom");
         bottom.setAttributeNS(W_NS, "w:val", "single");
@@ -497,7 +496,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         bottom.setAttributeNS(W_NS, "w:space", "0");
         bottom.setAttributeNS(W_NS, "w:color", "000000");
 
-        // Remove cell margins for tight fit around text
+        // Remove cell margins so border hugs the text
         const tcMar = getOrCreate(tcPr, "w:tcMar");
         ["top", "bottom", "left", "right"].forEach(side => {
             const mar = getOrCreate(tcMar, `w:${side}`);
@@ -508,10 +507,6 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         const p = createElement("w:p");
         tc.appendChild(p);
         const pPr = getOrCreate(p, "w:pPr");
-        const jcP = getOrCreate(pPr, "w:jc");
-        jcP.setAttributeNS(W_NS, "w:val", "center");
-        
-        // Zero spacing
         const spacing = getOrCreate(pPr, "w:spacing");
         spacing.setAttributeNS(W_NS, "w:before", "0");
         spacing.setAttributeNS(W_NS, "w:after", "0");
@@ -573,6 +568,12 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
     tc2W.setAttributeNS(W_NS, "w:w", "5400");
     tc2W.setAttributeNS(W_NS, "w:type", "dxa");
 
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    const currentDateStr = `Ea Kar, ngày ${day} tháng ${month} năm ${year}`;
+
     switch (options.headerType) {
         case HeaderType.PARTY:
             tc1.appendChild(createStyledP("ĐẢNG BỘ XÃ EA KAR", false, false));
@@ -585,12 +586,13 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
             // Add 1 empty single line
             tc2.appendChild(createStyledP("", false, false));
             // Updated date text
-            tc2.appendChild(createStyledP("Ea Kar, ngày ... tháng ... năm ...", false, true));
+            tc2.appendChild(createStyledP(currentDateStr, false, true));
             break;
 
         case HeaderType.DEPARTMENT:
+            const deptName = options.departmentName || "TỔ TOÁN - TIN";
             tc1.appendChild(createStyledP("TRƯỜNG THCS CHU VĂN AN", false, false));
-            tc1.appendChild(createStyledP("TỔ: ...............................", true, false));
+            tc1.appendChild(createStyledP(deptName, true, false));
             tc1.appendChild(createStyledP("-------", false, false)); // Department uses static dashed line
             tc1.appendChild(createStyledP("Số: ... /...", false, false));
 
@@ -600,7 +602,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
             // Add 1 empty single line
             tc2.appendChild(createStyledP("", false, false));
             // Updated date text
-            tc2.appendChild(createStyledP("Ea Kar, ngày ... tháng ... năm ...", false, true));
+            tc2.appendChild(createStyledP(currentDateStr, false, true));
             break;
 
         case HeaderType.SCHOOL:
@@ -616,7 +618,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
             // Add 1 empty single line
             tc2.appendChild(createStyledP("", false, false));
             // Updated date text
-            tc2.appendChild(createStyledP("Ea Kar, ngày ... tháng ... năm ...", false, true));
+            tc2.appendChild(createStyledP(currentDateStr, false, true));
             break;
     }
 
