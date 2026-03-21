@@ -16,9 +16,12 @@ export default function App() {
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   
+  const todayStr = new Date().toISOString().split('T')[0];
+  
   const [options, setOptions] = useState<DocxOptions>({
     headerType: HeaderType.NONE,
     departmentName: "TỔ TOÁN - TIN",
+    documentDate: todayStr,
     removeNumbering: false,
     margins: { top: 2, bottom: 2, left: 3, right: 1.5 },
     font: { family: "Times New Roman", sizeNormal: 14, sizeTable: 13 },
@@ -172,6 +175,22 @@ export default function App() {
                                         <option value="TỔ GDTC - NGHỆ THUẬT">TỔ GDTC - NGHỆ THUẬT</option>
                                         <option value="TỔ VĂN PHÒNG">TỔ VĂN PHÒNG</option>
                                     </select>
+                                </div>
+                            )}
+
+                            {/* Document Date Picker */}
+                            {options.headerType !== HeaderType.NONE && (
+                                <div className="mt-4 animate-fadeIn border-t border-slate-100 pt-4">
+                                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                                        Ngày ban hành văn bản
+                                    </label>
+                                    <input 
+                                        type="date" 
+                                        value={options.documentDate || ""}
+                                        onChange={(e) => setOptions({...options, documentDate: e.target.value})}
+                                        className="w-full sm:w-1/2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-2">Mặc định là ngày hôm nay. Bạn có thể thay đổi nếu soạn văn bản cho ngày khác.</p>
                                 </div>
                             )}
                         </div>
