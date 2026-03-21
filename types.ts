@@ -22,6 +22,7 @@ export enum HeaderType {
 
 export interface DocxOptions {
   headerType: HeaderType;
+  departmentName?: string;
   removeNumbering: boolean;
   margins: {
     top: number;

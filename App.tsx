@@ -18,6 +18,7 @@ export default function App() {
   
   const [options, setOptions] = useState<DocxOptions>({
     headerType: HeaderType.NONE,
+    departmentName: "TỔ TOÁN - TIN",
     removeNumbering: false,
     margins: { top: 2, bottom: 2, left: 3, right: 1.5 },
     font: { family: "Times New Roman", sizeNormal: 14, sizeTable: 13 },
@@ -109,8 +110,8 @@ export default function App() {
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-bold uppercase tracking-wider mb-2">
             <Sparkles className="w-3 h-3" /> Phiên bản chuyển đổi số 2.0
           </div>
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tight uppercase">
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-700">CÔNG CỤ CHUẨN HÓA VĂN BẢN HÀNH CHÍNH</span>
+          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800 tracking-tight">
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-700">Công cụ chuẩn hóa văn bản hành chính</span>
           </h2>
           <p className="text-base sm:text-lg text-slate-500 max-w-3xl mx-auto font-medium leading-relaxed">
             Chuẩn hóa tài liệu của bạn ngay lập tức. Tuân thủ các quy tắc định dạng hành chính.
@@ -152,6 +153,27 @@ export default function App() {
                                 <option value={HeaderType.DEPARTMENT}>📚 Văn bản Nội bộ (Tổ chuyên môn)</option>
                             </select>
                             <p className="text-[10px] text-slate-400">Tự động chèn bảng thông tin cơ quan và Quốc hiệu vào đầu trang theo mẫu đã chọn</p>
+                            
+                            {/* NEW: Conditional Department Select */}
+                            {options.headerType === HeaderType.DEPARTMENT && (
+                                <div className="mt-4 animate-fadeIn border-t border-slate-100 pt-4">
+                                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                                        Chọn Tổ chuyên môn
+                                    </label>
+                                    <select 
+                                        value={options.departmentName || "TỔ TOÁN - TIN"}
+                                        onChange={(e) => setOptions({...options, departmentName: e.target.value})}
+                                        className="w-full px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-blue-800"
+                                    >
+                                        <option value="TỔ TOÁN - TIN">TỔ TOÁN - TIN</option>
+                                        <option value="TỔ NGỮ VĂN">TỔ NGỮ VĂN</option>
+                                        <option value="TỔ KHOA HỌC TỰ NHIÊN">TỔ KHOA HỌC TỰ NHIÊN</option>
+                                        <option value="TỔ KHOA HỌC XÃ HỘI">TỔ KHOA HỌC XÃ HỘI</option>
+                                        <option value="TỔ GDTC - NGHỆ THUẬT">TỔ GDTC - NGHỆ THUẬT</option>
+                                        <option value="TỔ VĂN PHÒNG">TỔ VĂN PHÒNG</option>
+                                    </select>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -389,43 +411,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Footer Info Grid - Tech Cards */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md hover:border-blue-200 transition-all group">
-            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600 mb-4 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-              <LayoutTemplate className="w-5 h-5" />
-            </div>
-            <h4 className="font-bold text-slate-800 mb-3 text-sm uppercase tracking-wider">Khổ giấy & Lề</h4>
-            <ul className="space-y-2 text-sm text-slate-500">
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Size:</span> <span className="font-semibold text-slate-700">A4 Portrait</span></li>
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Margins:</span> <span className="font-semibold text-slate-700">{options.margins.top}, {options.margins.bottom}, {options.margins.left}, {options.margins.right} cm</span></li>
-            </ul>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md hover:border-blue-200 transition-all group">
-            <div className="w-10 h-10 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600 mb-4 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              <Settings2 className="w-5 h-5" />
-            </div>
-            <h4 className="font-bold text-slate-800 mb-3 text-sm uppercase tracking-wider">Đoạn văn & Font</h4>
-            <ul className="space-y-2 text-sm text-slate-500">
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Font:</span> <span className="font-semibold text-slate-700">{options.font.family}</span></li>
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Size:</span> <span className="font-semibold text-slate-700">{options.font.sizeNormal}pt / Justify</span></li>
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Line:</span> <span className="font-semibold text-slate-700">{options.paragraph.lineSpacing} / Indent {options.paragraph.indent}</span></li>
-            </ul>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md hover:border-blue-200 transition-all group">
-            <div className="w-10 h-10 bg-cyan-50 rounded-lg flex items-center justify-center text-cyan-600 mb-4 group-hover:bg-cyan-600 group-hover:text-white transition-colors">
-              <Database className="w-5 h-5" />
-            </div>
-            <h4 className="font-bold text-slate-800 mb-3 text-sm uppercase tracking-wider">Bảng biểu</h4>
-            <ul className="space-y-2 text-sm text-slate-500">
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Row Height:</span> <span className="font-semibold text-slate-700">Tối thiểu {options.table.rowHeight} cm</span></li>
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Align:</span> <span className="font-semibold text-slate-700">Center</span></li>
-              <li className="flex justify-between border-b border-slate-50 pb-1"><span>Size:</span> <span className="font-semibold text-slate-700">{options.font.sizeTable}pt</span></li>
-            </ul>
-          </div>
-        </div>
 
       </main>
       
