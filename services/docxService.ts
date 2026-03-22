@@ -37,8 +37,7 @@ const DEFAULT_OPTIONS: DocxOptions = {
 // Helper to parse and normalize bad document titles
 const normalizeTitleText = (rawText: string): { docType: string, summary: string } | null => {
     // Only match if it starts with the exact keywords
-    const keywords = ["KẾ HOẠCH", "BÁO CÁO", "BIÊN BẢN", "TỜ TRÌNH", "GIẤY MỜI", "QUYẾT ĐỊNH", "THÔNG BÁO"];
-    const regex = new RegExp(`^\\s*(${keywords.join('|')})\\s*(.*)$`, 'i');
+    const regex = new RegExp(`^\\s*(${DOC_TYPE_KEYWORDS.join('|')})\\s*(.*)$`, 'i');
     const match = rawText.match(regex);
 
     if (!match) return null;
@@ -272,6 +271,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
 
     // Apply Formatting Loop
     let hasNormalizedTitle = false;
+    let detectedDocType = "";
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
       const pIndex = i + 1;
@@ -384,23 +384,19 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       });
 
       // CRITICAL SAFETY LOCK: Only check first 10 paragraphs, stop if already found
-      if (!hasNormalizedTitle && pIndex <= 10 && pText.length > 0 && pText.length < 150) {
+      if (!hasNormalizedTitle && pIndex <= 10 && pText.length > 0 && pText.length < 200) {
           // To avoid false positives in body text, ensure the text is somewhat "title-like" 
           // (e.g. it is entirely uppercase or starts with uppercase doc type)
-          const isLikelyTitle = pText.toUpperCase().startsWith("KẾ HOẠCH") || 
-                                pText.toUpperCase().startsWith("BÁO CÁO") || 
-                                pText.toUpperCase().startsWith("BIÊN BẢN") || 
-                                pText.toUpperCase().startsWith("TỜ TRÌNH") ||
-                                pText.toUpperCase().startsWith("GIẤY MỜI") ||
-                                pText.toUpperCase().startsWith("QUYẾT ĐỊNH");
+          const upperPText = pText.toUpperCase().trim();
+          const isLikelyTitle = DOC_TYPE_KEYWORDS.some(k => upperPText.startsWith(k));
           
           if (isLikelyTitle) {
               let combinedText = pText;
               let nextP = p.nextSibling;
               let extraParagraphs: Element[] = [];
 
-              // Look ahead up to 2 paragraphs for split titles (usually short and ALL CAPS)
-              for (let i = 0; i < 2; i++) {
+              // Look ahead up to 3 paragraphs for split titles (usually short and ALL CAPS)
+              for (let i = 0; i < 3; i++) {
                   if (nextP && nextP.nodeName === "w:p") {
                       let nextText = "";
                       const nextRuns = Array.from((nextP as Element).getElementsByTagNameNS(W_NS, "r"));
@@ -413,7 +409,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                       // If it's short and completely uppercase, it's a continuation of the title
                       const isAllCaps = trimmedNext.length > 0 && trimmedNext === trimmedNext.toUpperCase();
                       
-                      if (trimmedNext.length > 0 && trimmedNext.length < 120 && isAllCaps) {
+                      if (trimmedNext.length > 0 && trimmedNext.length < 150 && isAllCaps) {
                           combinedText += " " + trimmedNext;
                           extraParagraphs.push(nextP as Element);
                           nextP = nextP.nextSibling;
@@ -428,6 +424,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
               const normalized = normalizeTitleText(combinedText);
               if (normalized) {
                   hasNormalizedTitle = true; // LOCK ENGAGED
+                  detectedDocType = normalized.docType;
                   
                   // Delete the extra paragraphs we just merged
                   extraParagraphs.forEach(ep => ep.parentNode?.removeChild(ep));
@@ -441,6 +438,8 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                   rPrType.appendChild(doc.createElementNS(W_NS, "w:b")); 
                   const szType = getOrCreate(rPrType, "w:sz");
                   szType.setAttributeNS(W_NS, "w:val", "28"); 
+                  const szCsType = getOrCreate(rPrType, "w:szCs");
+                  szCsType.setAttributeNS(W_NS, "w:val", "28"); 
                   const tType = doc.createElementNS(W_NS, "w:t");
                   tType.textContent = normalized.docType;
                   rType.appendChild(tType);
@@ -457,6 +456,8 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                   rPrSum.appendChild(doc.createElementNS(W_NS, "w:b")); 
                   const szSum = getOrCreate(rPrSum, "w:sz");
                   szSum.setAttributeNS(W_NS, "w:val", "28"); 
+                  const szCsSum = getOrCreate(rPrSum, "w:szCs");
+                  szCsSum.setAttributeNS(W_NS, "w:val", "28"); 
                   
                   const tSum = doc.createElementNS(W_NS, "w:t");
                   tSum.textContent = normalized.summary;
@@ -511,7 +512,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         // Add a blank paragraph before the signature block for spacing
         const blankP = doc.createElementNS(W_NS, "w:p");
         
-        const signatureBlock = createSignatureBlock(doc, options);
+        const signatureBlock = createSignatureBlock(doc, options, detectedDocType);
         
         if (lastSectPr && lastSectPr.parentNode === body) {
             body.insertBefore(blankP, lastSectPr);
@@ -741,7 +742,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         const spacing = getOrCreate(pPr, "w:spacing");
         spacing.setAttributeNS(W_NS, "w:before", "0");
         spacing.setAttributeNS(W_NS, "w:after", "0");
-        spacing.setAttributeNS(W_NS, "w:line", "240"); // Explicit 12 twips (single) spacing
+        spacing.setAttributeNS(W_NS, "w:line", "240"); // Explicit 240 twips (12pt) spacing
         spacing.setAttributeNS(W_NS, "w:lineRule", "exact"); // Force exact rule
 
         // Create the text run with styling
@@ -755,6 +756,57 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         const t = createElement("w:t");
         t.textContent = text;
         r.appendChild(t);
+
+        return tbl;
+    };
+
+    // Helper to create a short solid black line (approx 1/3 width of the text)
+    const createShortLineTable = (): Element => {
+        const tbl = createElement("w:tbl");
+        const tblPr = getOrCreate(tbl, "w:tblPr");
+        
+        const jcTbl = getOrCreate(tblPr, "w:jc");
+        jcTbl.setAttributeNS(W_NS, "w:val", "center");
+        
+        const tblLayout = getOrCreate(tblPr, "w:tblLayout");
+        tblLayout.setAttributeNS(W_NS, "w:type", "fixed");
+
+        const tr = createElement("w:tr");
+        tbl.appendChild(tr);
+
+        const tc = createElement("w:tc");
+        tr.appendChild(tc);
+        const tcPr = getOrCreate(tc, "w:tcPr");
+
+        // Set width exactly to ~1/3 of "TRƯỜNG THCS CHU VĂN AN" (approx 900 twips)
+        const tcW = getOrCreate(tcPr, "w:tcW");
+        tcW.setAttributeNS(W_NS, "w:w", "900");
+        tcW.setAttributeNS(W_NS, "w:type", "dxa");
+
+        const tcBorders = getOrCreate(tcPr, "w:tcBorders");
+        // Using top border so it sits extremely close to the text above
+        const top = getOrCreate(tcBorders, "w:top"); 
+        top.setAttributeNS(W_NS, "w:val", "single");
+        top.setAttributeNS(W_NS, "w:sz", "2"); // 1/4 pt (thin line)
+        top.setAttributeNS(W_NS, "w:space", "0");
+        top.setAttributeNS(W_NS, "w:color", "000000");
+
+        const tcMar = getOrCreate(tcPr, "w:tcMar");
+        ["top", "bottom", "left", "right"].forEach(side => {
+            const mar = getOrCreate(tcMar, `w:${side}`);
+            mar.setAttributeNS(W_NS, "w:w", "0");
+            mar.setAttributeNS(W_NS, "w:type", "dxa");
+        });
+
+        // Blank tight paragraph inside the cell
+        const p = createElement("w:p");
+        tc.appendChild(p);
+        const pPr = getOrCreate(p, "w:pPr");
+        const spacing = getOrCreate(pPr, "w:spacing");
+        spacing.setAttributeNS(W_NS, "w:before", "0");
+        spacing.setAttributeNS(W_NS, "w:after", "0");
+        spacing.setAttributeNS(W_NS, "w:line", "24"); // Ultra tight height (1.2pt)
+        spacing.setAttributeNS(W_NS, "w:lineRule", "exact");
 
         return tbl;
     };
@@ -813,7 +865,8 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         case HeaderType.PARTY:
             tc1.appendChild(createStyledP("ĐẢNG BỘ XÃ EA KAR", false, false));
             tc1.appendChild(createStyledP("CHI BỘ TRƯỜNG THCS CHU VĂN AN", true, false));
-            tc1.appendChild(createStyledP("*", false, false));
+            tc1.appendChild(createStyledP("*", false, false)); // Mandatory asterisk for Party documents
+            tc1.appendChild(createStyledP("", false, false));  // Empty line for vertical alignment
             tc1.appendChild(createStyledP("Số: ... - .../CB", false, false));
 
             // Nested table for thin, text-length line
@@ -828,7 +881,8 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
             const deptName = options.departmentName || "TỔ TOÁN - TIN";
             tc1.appendChild(createStyledP("TRƯỜNG THCS CHU VĂN AN", false, false));
             tc1.appendChild(createStyledP(deptName, true, false));
-            tc1.appendChild(createStyledP("-------", false, false)); // Department uses static dashed line
+            tc1.appendChild(createShortLineTable()); // Use OOXML line
+            tc1.appendChild(createStyledP("", false, false));
             tc1.appendChild(createStyledP("Số: ... /...", false, false));
 
             tc2.appendChild(createStyledP("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", true, false));
@@ -844,7 +898,8 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         default:
             tc1.appendChild(createStyledP("UBND XÃ EA KAR", false, false));
             tc1.appendChild(createStyledP("TRƯỜNG THCS CHU VĂN AN", true, false));
-            tc1.appendChild(createStyledP("-------", false, false));
+            tc1.appendChild(createShortLineTable());
+            tc1.appendChild(createStyledP("", false, false));
             tc1.appendChild(createStyledP("Số: ... /...", false, false));
 
             tc2.appendChild(createStyledP("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", true, false));
@@ -861,7 +916,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
 };
 
 // Helper to create the Signature Block at the end of the document
-const createSignatureBlock = (doc: Document, options: DocxOptions): Element => {
+const createSignatureBlock = (doc: Document, options: DocxOptions, docType: string): Element => {
     const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const createElement = (tagName: string) => doc.createElementNS(W_NS, tagName);
     const getOrCreate = (parent: Element, tagName: string): Element => {
@@ -921,45 +976,62 @@ const createSignatureBlock = (doc: Document, options: DocxOptions): Element => {
     const tr = createElement("w:tr");
     tbl.appendChild(tr);
 
-    // --- Left Cell (Nơi nhận) ---
+    // --- Left Cell ---
     const tc1 = createElement("w:tc");
     tr.appendChild(tc1);
     const tc1Pr = getOrCreate(tc1, "w:tcPr");
-    
-    // 2. CRITICAL FIX: Set Left Cell to 40% width (2000 pct)
-    const tc1W = getOrCreate(tc1Pr, "w:tcW");
-    tc1W.setAttributeNS(W_NS, "w:w", "2000");
-    tc1W.setAttributeNS(W_NS, "w:type", "pct");
-    
-    // Tightened P instances
-    tc1.appendChild(createTightP("Nơi nhận:", true, true, "left"));
-    tc1.appendChild(createTightP("- Như trên;", false, false, "left"));
-    tc1.appendChild(createTightP("- Lưu: VT...", false, false, "left"));
 
-    // --- Right Cell (Chữ ký) ---
+    // --- Right Cell ---
     const tc2 = createElement("w:tc");
     tr.appendChild(tc2);
     const tc2Pr = getOrCreate(tc2, "w:tcPr");
-    
-    // 3. CRITICAL FIX: Set Right Cell to 60% width (3000 pct)
-    const tc2W = getOrCreate(tc2Pr, "w:tcW");
-    tc2W.setAttributeNS(W_NS, "w:w", "3000");
-    tc2W.setAttributeNS(W_NS, "w:type", "pct");
 
-    switch (options.headerType) {
-        case 'PARTY':
-            tc2.appendChild(createTightP("T/M CHI BỘ", true, false, "center"));
-            // Removed createTightP("", false, false, "center")
-            tc2.appendChild(createTightP("BÍ THƯ", true, false, "center")); // Tight titles
-            break;
-        case 'DEPARTMENT':
-            tc2.appendChild(createTightP("TỔ TRƯỞNG", true, false, "center"));
-            break;
-        case 'SCHOOL':
-        default:
-            tc2.appendChild(createTightP("HIỆU TRƯỞNG", true, false, "center"));
-            break;
+    // Check if it is a Meeting Minutes document
+    const isMinutes = docType === "BIÊN BẢN";
+
+    if (isMinutes) {
+        // 50/50 Width Split for Minutes
+        const tc1W = getOrCreate(tc1Pr, "w:tcW");
+        tc1W.setAttributeNS(W_NS, "w:w", "2500"); // 50%
+        tc1W.setAttributeNS(W_NS, "w:type", "pct");
+        
+        const tc2W = getOrCreate(tc2Pr, "w:tcW");
+        tc2W.setAttributeNS(W_NS, "w:w", "2500"); // 50%
+        tc2W.setAttributeNS(W_NS, "w:type", "pct");
+
+        // Insert Minutes Signatures
+        tc1.appendChild(createTightP("THƯ KÝ", true, false, "center"));
+        tc2.appendChild(createTightP("CHỦ TRÌ", true, false, "center"));
+    } else {
+        // Standard 40/60 Width Split for other documents
+        const tc1W = getOrCreate(tc1Pr, "w:tcW");
+        tc1W.setAttributeNS(W_NS, "w:w", "2000"); // 40%
+        tc1W.setAttributeNS(W_NS, "w:type", "pct");
+        
+        const tc2W = getOrCreate(tc2Pr, "w:tcW");
+        tc2W.setAttributeNS(W_NS, "w:w", "3000"); // 60%
+        tc2W.setAttributeNS(W_NS, "w:type", "pct");
+
+        // Insert "Nơi nhận"
+        tc1.appendChild(createTightP("Nơi nhận:", true, true, "left"));
+        tc1.appendChild(createTightP("- Như trên;", false, false, "left"));
+        tc1.appendChild(createTightP("- Lưu: VT...", false, false, "left"));
+
+        // Insert Standard Signatures based on HeaderType
+        switch (options.headerType) {
+            case 'PARTY':
+                tc2.appendChild(createTightP("T/M CHI BỘ", true, false, "center"));
+                tc2.appendChild(createTightP("BÍ THƯ", true, false, "center"));
+                break;
+            case 'DEPARTMENT':
+                tc2.appendChild(createTightP("TỔ TRƯỞNG", true, false, "center"));
+                break;
+            case 'SCHOOL':
+            default:
+                tc2.appendChild(createTightP("HIỆU TRƯỞNG", true, false, "center"));
+                break;
+        }
     }
 
     return tbl;
-};
+}
