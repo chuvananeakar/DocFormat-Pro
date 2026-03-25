@@ -46,4 +46,7 @@ export interface DocxOptions {
   };
   signerTitle?: string;
   signerName?: string;
+  isMinutes?: boolean;
+  presiderName?: string;
+  secretaryName?: string;
 }

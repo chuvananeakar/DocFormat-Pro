@@ -28,10 +28,15 @@ export default function App() {
     paragraph: { lineSpacing: 1.15, after: 6, indent: 1.27 },
     table: { rowHeight: 0.8 },
     signerTitle: "",
-    signerName: ""
+    signerName: "",
+    isMinutes: false,
+    presiderName: "",
+    secretaryName: ""
   });
 
-  const isUploadDisabled = options.headerType !== HeaderType.NONE && (!options.signerTitle?.trim() || !options.signerName?.trim());
+  const isUploadDisabled = options.isMinutes 
+    ? (!options.presiderName?.trim() || !options.secretaryName?.trim())
+    : (options.headerType !== HeaderType.NONE && (!options.signerTitle?.trim() || !options.signerName?.trim()));
 
   const handleFileSelect = (selectedFile: File) => {
     setFile(selectedFile);
@@ -198,8 +203,27 @@ export default function App() {
                                 </div>
                             )}
 
+                            {/* Minutes Option Checkbox */}
+                            <div className="mt-4 pt-4 border-t border-slate-100">
+                                <label className="flex items-center gap-3 cursor-pointer group">
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${options.isMinutes ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 group-hover:border-blue-400'}`}>
+                                        {options.isMinutes && <CheckSquare className="w-3.5 h-3.5" />}
+                                    </div>
+                                    <input 
+                                        type="checkbox" 
+                                        className="hidden"
+                                        checked={options.isMinutes}
+                                        onChange={(e) => setOptions({...options, isMinutes: e.target.checked})}
+                                    />
+                                    <div>
+                                        <span className="text-sm font-bold text-slate-700 group-hover:text-blue-600 transition-colors">Đây là văn bản BIÊN BẢN</span>
+                                        <p className="text-[10px] text-slate-400">Tự động cấu hình định dạng dành riêng cho biên bản cuộc họp</p>
+                                    </div>
+                                </label>
+                            </div>
+
                             {/* Signer Information */}
-                            {options.headerType !== HeaderType.NONE && (
+                            {!options.isMinutes && options.headerType !== HeaderType.NONE && (
                                 <div className="mt-4 animate-fadeIn border-t border-slate-100 pt-4 space-y-4">
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -234,11 +258,56 @@ export default function App() {
                                 </div>
                             )}
 
+                            {/* Minutes Signer Information */}
+                            {options.isMinutes && (
+                                <div className="mt-4 animate-fadeIn border-t border-slate-100 pt-4 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">
+                                            Nhập Họ và tên CHỦ TỌA
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="VD: Nguyễn Văn A..."
+                                            value={options.presiderName || ""}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                const formatted = val.split(' ').map(word => 
+                                                    word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+                                                ).join(' ');
+                                                setOptions({...options, presiderName: formatted});
+                                            }}
+                                            className="w-full px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-blue-800"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">
+                                            Nhập Họ và tên THƯ KÝ
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="VD: Trần Thị B..."
+                                            value={options.secretaryName || ""}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                const formatted = val.split(' ').map(word => 
+                                                    word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+                                                ).join(' ');
+                                                setOptions({...options, secretaryName: formatted});
+                                            }}
+                                            className="w-full px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-blue-800"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             {isUploadDisabled && (
                                 <div className="mt-4 p-3 bg-red-50 border border-red-100 rounded-xl animate-fadeIn">
                                     <p className="text-xs font-bold text-red-600 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></span>
-                                        Bạn chưa nhập đầy đủ thông tin về chức vụ người ký hoặc họ và tên người ký
+                                        {options.isMinutes 
+                                            ? "Bạn chưa nhập đầy đủ họ tên Chủ tọa và Thư ký"
+                                            : "Bạn chưa nhập đầy đủ thông tin về chức vụ người ký hoặc họ và tên người ký"
+                                        }
                                     </p>
                                 </div>
                             )}
