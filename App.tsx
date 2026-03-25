@@ -26,8 +26,12 @@ export default function App() {
     margins: { top: 2, bottom: 2, left: 3, right: 1.5 },
     font: { family: "Times New Roman", sizeNormal: 14, sizeTable: 13 },
     paragraph: { lineSpacing: 1.15, after: 6, indent: 1.27 },
-    table: { rowHeight: 0.8 }
+    table: { rowHeight: 0.8 },
+    signerTitle: "",
+    signerName: ""
   });
+
+  const isUploadDisabled = options.headerType !== HeaderType.NONE && (!options.signerTitle?.trim() || !options.signerName?.trim());
 
   const handleFileSelect = (selectedFile: File) => {
     setFile(selectedFile);
@@ -193,6 +197,51 @@ export default function App() {
                                     <p className="text-[10px] text-slate-400 mt-2">Mặc định là ngày hôm nay. Bạn có thể thay đổi nếu soạn văn bản cho ngày khác.</p>
                                 </div>
                             )}
+
+                            {/* Signer Information */}
+                            {options.headerType !== HeaderType.NONE && (
+                                <div className="mt-4 animate-fadeIn border-t border-slate-100 pt-4 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">
+                                            Chức vụ người ký
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Nhập chức vụ người ký (VD: PHÓ HIỆU TRƯỞNG...)"
+                                            value={options.signerTitle || ""}
+                                            onChange={(e) => setOptions({...options, signerTitle: e.target.value.toUpperCase()})}
+                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">
+                                            Họ và tên người ký
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Nhập Họ và tên người ký (VD: Nguyễn Văn A...)"
+                                            value={options.signerName || ""}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                const formatted = val.split(' ').map(word => 
+                                                    word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+                                                ).join(' ');
+                                                setOptions({...options, signerName: formatted});
+                                            }}
+                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {isUploadDisabled && (
+                                <div className="mt-4 p-3 bg-red-50 border border-red-100 rounded-xl animate-fadeIn">
+                                    <p className="text-xs font-bold text-red-600 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></span>
+                                        Bạn chưa nhập đầy đủ thông tin về chức vụ người ký hoặc họ và tên người ký
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -319,7 +368,7 @@ export default function App() {
                   <span className="text-slate-500">Tải lên tài liệu</span>
                   <div className="h-px bg-slate-100 flex-grow"></div>
                 </div>
-                <Dropzone onFileSelect={handleFileSelect} />
+                <Dropzone onFileSelect={handleFileSelect} disabled={isUploadDisabled} />
               </div>
             )}
 

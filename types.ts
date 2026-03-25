@@ -44,4 +44,6 @@ export interface DocxOptions {
   table: {
     rowHeight: number;
   };
+  signerTitle?: string;
+  signerName?: string;
 }
