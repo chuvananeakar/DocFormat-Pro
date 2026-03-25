@@ -19,23 +19,30 @@ const DEFAULT_OPTIONS: DocxOptions = {
   table: { rowHeight: 0.8 }
 };
 
+// ĐÃ FIX LỖI NUỐT DẤU CÁCH VÀ LỖI BACKTRACKING SỐ THÁNG
 const normalizeSummary = (text: string): string => {
     let summary = text.trim();
     if (!summary) return "";
     summary = summary.replace(/^[:-]\s*/, '').trim();
-    summary = summary.replace(/(?:-|–)?\s*tháng\s+(\d{1,2})(?:\/|-)(\d{4})/gi, (match, m, y) => {
-        return `tháng ${m.padStart(2, '0')} năm ${y}`;
+    
+    // Fix 1: Giữ lại dấu cách phía trước (prefix) bằng (^|\s)
+    summary = summary.replace(/(^|\s)(?:-|–)?\s*tháng\s+(\d{1,2})(?:\/|-)(\d{4})/gi, (match, prefix, m, y) => {
+        return `${prefix}tháng ${m.padStart(2, '0')} năm ${y}`;
     });
+    
+    // Fix 2: Chặn backtrack tách số bằng \b (Word boundary)
     const currentYear = new Date().getFullYear();
-    summary = summary.replace(/(?:-|–)?\s*tháng\s+(\d{1,2})(?!\s*năm|\/|-)/gi, (match, m) => {
-        return `tháng ${m.padStart(2, '0')} năm ${currentYear}`;
+    summary = summary.replace(/(^|\s)(?:-|–)?\s*tháng\s+(\d{1,2})\b(?!\s*năm|\/|-)/gi, (match, prefix, m) => {
+        return `${prefix}tháng ${m.padStart(2, '0')} năm ${currentYear}`;
     });
+    
     if (summary.length > 0) {
         summary = summary.charAt(0).toUpperCase() + summary.slice(1).toLowerCase();
     }
-    return summary;
+    return summary.trim();
 };
 
+// "CẢNH SÁT KIỂM DUYỆT" - Khóa cứng trật tự XML chuẩn MS Word để chống lỗi Unreadable Content
 const enforceSchema = (doc: Document) => {
     const orders: Record<string, string[]> = {
         "w:pPr": ["w:pStyle", "w:spacing", "w:ind", "w:jc", "w:rPr"],
@@ -99,6 +106,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       return false;
     };
 
+    // --- BƯỚC 1: DỌN DẸP RÁC ---
     const paragraphsForCleaning = Array.from(doc.getElementsByTagNameNS(W_NS, "p"));
     for (const p of paragraphsForCleaning) {
         const textNodes = Array.from(p.getElementsByTagNameNS(W_NS, "t"));
@@ -153,39 +161,49 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       pgMar.setAttributeNS(W_NS, "w:right", String(Math.round(options.margins.right * TWIPS_PER_CM)));
     }
 
+    // --- BƯỚC 2: KHÓA MỤC TIÊU TIÊU ĐỀ & TRÍCH YẾU ---
     const rebuildParagraph = (p: Element, text: string, isBold: boolean, fontSize: string, isTitle: boolean) => {
         Array.from(p.childNodes).forEach(child => {
             if (child.nodeName !== "w:pPr") p.removeChild(child);
         });
+        
         const r = doc.createElementNS(W_NS, "w:r");
         const rPr = doc.createElementNS(W_NS, "w:rPr");
         r.appendChild(rPr); 
+        
         const pPr = getOrCreate(p, "w:pPr");
         const jc = getOrCreate(pPr, "w:jc");
         jc.setAttributeNS(W_NS, "w:val", "center");
+        
         const ind = getOrCreate(pPr, "w:ind");
         ind.setAttributeNS(W_NS, "w:left", "0");
         ind.setAttributeNS(W_NS, "w:right", "0");
         ind.setAttributeNS(W_NS, "w:firstLine", "0");
         ind.removeAttributeNS(W_NS, "hanging");
+
         const spacing = getOrCreate(pPr, "w:spacing");
         spacing.setAttributeNS(W_NS, "w:before", isTitle ? "480" : "0");
         spacing.setAttributeNS(W_NS, "w:after", "0"); 
         spacing.setAttributeNS(W_NS, "w:line", "240");
         spacing.setAttributeNS(W_NS, "w:lineRule", "auto");
+
         const rFonts = getOrCreate(rPr, "w:rFonts");
         rFonts.setAttributeNS(W_NS, "w:ascii", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:hAnsi", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:cs", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:eastAsia", options.font.family);
+
         const b = getOrCreate(rPr, "w:b");
         b.setAttributeNS(W_NS, "w:val", isBold ? "true" : "false"); 
+        
         const iEl = getOrCreate(rPr, "w:i");
         iEl.setAttributeNS(W_NS, "w:val", "false");
+
         const sz = getOrCreate(rPr, "w:sz");
         sz.setAttributeNS(W_NS, "w:val", fontSize);
         const szCs = getOrCreate(rPr, "w:szCs");
         szCs.setAttributeNS(W_NS, "w:val", fontSize);
+
         const t = doc.createElementNS(W_NS, "w:t");
         t.textContent = text;
         r.appendChild(t);
@@ -195,40 +213,51 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
     const createTitleUnderlineFrag = (protectedElements: Set<Element>, lineTables: Set<Element>): DocumentFragment => {
         const frag = doc.createDocumentFragment();
         const tbl = doc.createElementNS(W_NS, "w:tbl");
+        
         lineTables.add(tbl); 
+
         const tblPr = doc.createElementNS(W_NS, "w:tblPr");
         tbl.appendChild(tblPr);
+
         const jcTbl = doc.createElementNS(W_NS, "w:jc");
         jcTbl.setAttributeNS(W_NS, "w:val", "center");
         tblPr.appendChild(jcTbl);
+
         const tblW = doc.createElementNS(W_NS, "w:tblW");
         tblW.setAttributeNS(W_NS, "w:w", "1500");
         tblW.setAttributeNS(W_NS, "w:type", "dxa");
         tblPr.appendChild(tblW);
+
         const tblLayout = doc.createElementNS(W_NS, "w:tblLayout");
         tblLayout.setAttributeNS(W_NS, "w:type", "fixed");
         tblPr.appendChild(tblLayout);
+
         const tblGrid = doc.createElementNS(W_NS, "w:tblGrid");
         const gridCol = doc.createElementNS(W_NS, "w:gridCol");
         gridCol.setAttributeNS(W_NS, "w:w", "1500");
         tblGrid.appendChild(gridCol);
         tbl.appendChild(tblGrid);
+
         const tr = doc.createElementNS(W_NS, "w:tr");
         tbl.appendChild(tr);
+
         const trPr = doc.createElementNS(W_NS, "w:trPr");
         const trHeight = doc.createElementNS(W_NS, "w:trHeight");
         trHeight.setAttributeNS(W_NS, "w:val", String(Math.round(0.1 * TWIPS_PER_CM)));
         trHeight.setAttributeNS(W_NS, "w:hRule", "exact");
         trPr.appendChild(trHeight);
         tr.appendChild(trPr);
+
         const tc = doc.createElementNS(W_NS, "w:tc");
         tr.appendChild(tc);
+
         const tcPr = doc.createElementNS(W_NS, "w:tcPr");
         tc.appendChild(tcPr);
         const tcW = doc.createElementNS(W_NS, "w:tcW");
         tcW.setAttributeNS(W_NS, "w:w", "1500");
         tcW.setAttributeNS(W_NS, "w:type", "dxa");
         tcPr.appendChild(tcW);
+
         const tcMar = doc.createElementNS(W_NS, "w:tcMar");
         ["top", "bottom", "left", "right"].forEach(side => {
             const mar = doc.createElementNS(W_NS, `w:${side}`);
@@ -237,6 +266,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
             tcMar.appendChild(mar);
         });
         tcPr.appendChild(tcMar);
+
         const tcBorders = doc.createElementNS(W_NS, "w:tcBorders");
         const top = doc.createElementNS(W_NS, "w:top");
         top.setAttributeNS(W_NS, "w:val", "single");
@@ -245,6 +275,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         top.setAttributeNS(W_NS, "w:color", "000000");
         tcBorders.appendChild(top);
         tcPr.appendChild(tcBorders);
+
         const p = doc.createElementNS(W_NS, "w:p");
         const pPr = doc.createElementNS(W_NS, "w:pPr");
         p.appendChild(pPr);
@@ -255,8 +286,10 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         spacing.setAttributeNS(W_NS, "w:lineRule", "exact");
         pPr.appendChild(spacing);
         tc.appendChild(p);
+
         protectedElements.add(p);
         frag.appendChild(tbl);
+
         const safeP = doc.createElementNS(W_NS, "w:p");
         const safePPr = doc.createElementNS(W_NS, "w:pPr");
         safeP.appendChild(safePPr);
@@ -266,43 +299,54 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         safeSpacing.setAttributeNS(W_NS, "w:line", "2"); 
         safeSpacing.setAttributeNS(W_NS, "w:lineRule", "exact");
         safePPr.appendChild(safeSpacing);
+        
         protectedElements.add(safeP);
         frag.appendChild(safeP);
+
         return frag;
     };
 
     const createPartyDashLine = (protectedElements: Set<Element>): Element => {
         const p = doc.createElementNS(W_NS, "w:p");
         const pPr = getOrCreate(p, "w:pPr");
+        
         const jc = getOrCreate(pPr, "w:jc");
         jc.setAttributeNS(W_NS, "w:val", "center");
+
         const ind = getOrCreate(pPr, "w:ind");
         ind.setAttributeNS(W_NS, "w:left", "0");
         ind.setAttributeNS(W_NS, "w:right", "0");
         ind.setAttributeNS(W_NS, "w:firstLine", "0");
         ind.removeAttributeNS(W_NS, "hanging");
+
         const spacing = getOrCreate(pPr, "w:spacing");
         spacing.setAttributeNS(W_NS, "w:before", "0");
         spacing.setAttributeNS(W_NS, "w:after", "120"); 
         spacing.setAttributeNS(W_NS, "w:line", "240"); 
         spacing.setAttributeNS(W_NS, "w:lineRule", "auto");
+
         const r = doc.createElementNS(W_NS, "w:r");
         const rPr = getOrCreate(r, "w:rPr");
+        
         const rFonts = getOrCreate(rPr, "w:rFonts");
         rFonts.setAttributeNS(W_NS, "w:ascii", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:hAnsi", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:cs", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:eastAsia", options.font.family);
+
         const b = getOrCreate(rPr, "w:b");
         b.setAttributeNS(W_NS, "w:val", "false"); 
+
         const sz = getOrCreate(rPr, "w:sz");
         sz.setAttributeNS(W_NS, "w:val", String(options.font.sizeNormal * 2));
         const szCs = getOrCreate(rPr, "w:szCs");
         szCs.setAttributeNS(W_NS, "w:val", String(options.font.sizeNormal * 2));
+
         const t = doc.createElementNS(W_NS, "w:t");
         t.textContent = "-----";
         r.appendChild(t);
         p.appendChild(r);
+
         protectedElements.add(p);
         return p;
     };
@@ -313,6 +357,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
     const abstractElements = new Set<Element>();
     const protectedElements = new Set<Element>();
     const lineTables = new Set<Element>();
+
     const limit = Math.min(paragraphs.length, 20); 
     
     for (let i = 0; i < limit; i++) {
@@ -320,12 +365,14 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         if (isTableParagraph(p)) continue;
         const text = p.textContent?.trim() || "";
         if (!text) continue;
+
         const cleanText = text.toUpperCase().replace(/^[^A-ZÀ-Ỹ]+/, '');
         const matchedKeyword = DOC_TYPE_KEYWORDS.find(k => cleanText.startsWith(k));
 
         if (matchedKeyword) {
             docTypeElements.add(p);
             detectedDocType = matchedKeyword; 
+            
             let summaryP: Element | null = null;
             const originalUpper = text.toUpperCase();
             const keywordIndex = originalUpper.indexOf(matchedKeyword);
@@ -369,10 +416,12 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                 if (targetNode.nextSibling) targetNode.parentNode?.insertBefore(underlineFrag, targetNode.nextSibling);
                 else targetNode.parentNode?.appendChild(underlineFrag);
             }
+
             break; 
         }
     }
 
+    // --- BƯỚC 3: CĂN CHỈNH NỘI DUNG VĂN BẢN BÊN DƯỚI VÀ NHẬN DIỆN "QUYẾT ĐỊNH" ---
     const finalParagraphs = Array.from(doc.getElementsByTagNameNS(W_NS, "p"));
     for (const p of finalParagraphs) {
       if (docTypeElements.has(p) || abstractElements.has(p) || protectedElements.has(p)) continue; 
@@ -395,11 +444,13 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       if (isDecisionSpecialLine) {
         const jc = getOrCreate(pPr, "w:jc");
         jc.setAttributeNS(W_NS, "w:val", "center");
+        
         const spacing = getOrCreate(pPr, "w:spacing");
         spacing.setAttributeNS(W_NS, "w:before", "120");
         spacing.setAttributeNS(W_NS, "w:after", "120");
         spacing.setAttributeNS(W_NS, "w:line", "240"); 
         spacing.setAttributeNS(W_NS, "w:lineRule", "auto");
+        
         const ind = getOrCreate(pPr, "w:ind");
         ind.setAttributeNS(W_NS, "w:left", "0");
         ind.setAttributeNS(W_NS, "w:right", "0");
@@ -456,6 +507,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
     const tables = Array.from(doc.getElementsByTagNameNS(W_NS, "tbl"));
     for (const tbl of tables) {
         if (lineTables.has(tbl)) continue;
+
         const rows = Array.from(tbl.getElementsByTagNameNS(W_NS, "tr"));
         for (const tr of rows) {
             const trPr = getOrCreate(tr, "w:trPr");
@@ -466,6 +518,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                 trHeight.setAttributeNS(W_NS, "w:hRule", "atLeast");
                 trPr.appendChild(trHeight);
             }
+
             const cells = Array.from(tr.getElementsByTagNameNS(W_NS, "tc"));
             for (const tc of cells) {
                 const tcPr = getOrCreate(tc, "w:tcPr");
