@@ -427,28 +427,23 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       const pText = p.textContent?.trim() || "";
       const upperText = pText.toUpperCase();
 
-      // CƠ CHẾ ĐÁNH CHẶN THÔNG MINH DÀNH RIÊNG CHO VĂN BẢN "QUYẾT ĐỊNH"
       let isDecisionSpecialLine = false;
       if (detectedDocType === "QUYẾT ĐỊNH" && !isTable && pText.length > 0) {
-          // Bắt chữ "QUYẾT ĐỊNH:" (Từ lệnh)
           if (upperText === "QUYẾT ĐỊNH:" || upperText === "QUYẾT ĐỊNH") {
               isDecisionSpecialLine = true;
           } 
-          // Bắt các dòng Thẩm quyền ban hành (HIỆU TRƯỞNG...) 
-          // Nhận diện: Chữ in hoa toàn bộ, dưới 150 ký tự, có chứa chữ cái
           else if (pText === upperText && pText.length < 150 && /[A-ZÀ-Ỹ]/.test(upperText)) {
               isDecisionSpecialLine = true;
           }
       }
 
       if (isDecisionSpecialLine) {
-        // ÉP CHUẨN: CĂN GIỮA, IN ĐẬM
         const jc = getOrCreate(pPr, "w:jc");
         jc.setAttributeNS(W_NS, "w:val", "center");
         
         const spacing = getOrCreate(pPr, "w:spacing");
-        spacing.setAttributeNS(W_NS, "w:before", "120"); // 6pt thoáng bên trên
-        spacing.setAttributeNS(W_NS, "w:after", "120");  // 6pt thoáng bên dưới
+        spacing.setAttributeNS(W_NS, "w:before", "120");
+        spacing.setAttributeNS(W_NS, "w:after", "120");
         spacing.setAttributeNS(W_NS, "w:line", "240"); 
         spacing.setAttributeNS(W_NS, "w:lineRule", "auto");
         
@@ -463,13 +458,13 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         for (const r of runs) {
             const rPr = getOrCreate(r, "w:rPr");
             const b = getOrCreate(rPr, "w:b");
-            b.setAttributeNS(W_NS, "w:val", "true"); // Đóng đinh in đậm
+            b.setAttributeNS(W_NS, "w:val", "true");
             const sz = getOrCreate(rPr, "w:sz");
             sz.setAttributeNS(W_NS, "w:val", String(targetSize));
             const szCs = getOrCreate(rPr, "w:szCs");
             szCs.setAttributeNS(W_NS, "w:val", String(targetSize));
         }
-        continue; // Chặn ngang tại đây, không cho rớt xuống lùi đầu dòng bên dưới
+        continue; 
       }
 
       if (!isTable) {
@@ -549,14 +544,20 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         }
     }
 
-    const allRuns = Array.from(doc.getElementsByTagNameNS(W_NS, "r"));
-    for (const r of allRuns) {
-        const rPr = getOrCreate(r, "w:rPr");
+    // --- BƯỚC CẬP NHẬT MỚI: THANH TRỪNG THEME ĐỂ ÉP FONT TIMES NEW ROMAN ---
+    const allRPrs = Array.from(doc.getElementsByTagNameNS(W_NS, "rPr"));
+    for (const rPr of allRPrs) {
         const rFonts = getOrCreate(rPr, "w:rFonts");
         rFonts.setAttributeNS(W_NS, "w:ascii", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:hAnsi", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:cs", options.font.family);
         rFonts.setAttributeNS(W_NS, "w:eastAsia", options.font.family);
+        
+        // Diệt cỏ tận gốc các theme mặc định của Word gây lỗi hiển thị font
+        ["asciiTheme", "hAnsiTheme", "cstheme", "eastAsiaTheme"].forEach(theme => {
+            rFonts.removeAttributeNS(W_NS, theme);
+            rFonts.removeAttribute(`w:${theme}`); // Gỡ bỏ an toàn trên mọi parser
+        });
     }
 
     enforceSchema(doc);
