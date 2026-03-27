@@ -19,12 +19,30 @@ const DEFAULT_OPTIONS: DocxOptions = {
   table: { rowHeight: 0.8 }
 };
 
-// Chuẩn hóa ngày tháng, vá lỗi dính chữ và backtrack số 00
+// MÀNG LỌC THÔNG MINH XỬ LÝ TRÍCH YẾU
 const normalizeSummary = (text: string): string => {
     let summary = text.trim();
     if (!summary) return "";
     summary = summary.replace(/^[:-]\s*/, '').trim();
     
+    // 1. CHUYỂN IN THƯỜNG CÓ CHỌN LỌC (BẢO VỆ HUE-ICT, 2026 VÀ TỪ VIẾT TẮT)
+    const lowerRegex = /[a-zàáâãèéêìíòóôõùúăđĩũơưạảấầẩẫậắằẳẵặẹẻẽềềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳýỷỹỵ]/;
+    const specialRegex = /[0-9\-\/]/;
+    
+    summary = summary.split(/\s+/).map(word => {
+        // Nếu từ chứa chữ thường, số, gạch nối, gạch chéo -> Có khiên bảo vệ, bỏ qua!
+        if (lowerRegex.test(word) || specialRegex.test(word)) {
+            return word;
+        }
+        // Nếu từ IN HOA TOÀN BỘ -> Hạ cấp thành in thường, TRỪ các từ nằm trong danh sách viết tắt
+        return word.replace(/[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼỀỀỂỄỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲÝỶỸỴ]+/g, (match) => {
+            const acronyms = ["UBND", "THCS", "THPT", "BGDĐT", "SGDĐT", "PGDĐT", "ĐTN", "CĐ", "ĐCS", "VN", "GDĐT", "CNTT", "KHTN", "KHXH", "GDCD", "TDTT", "BCH", "CSCS", "CMHS", "ĐĐ", "BĐD"];
+            if (acronyms.includes(match)) return match;
+            return match.toLowerCase();
+        });
+    }).join(' ');
+
+    // 2. CHUẨN HÓA NGÀY THÁNG NĂM
     summary = summary.replace(/(^|\s)(?:-|–)?\s*tháng\s+(\d{1,2})(?:\/|-)(\d{4})/gi, (match, prefix, m, y) => {
         return `${prefix}tháng ${m.padStart(2, '0')} năm ${y}`;
     });
@@ -34,13 +52,31 @@ const normalizeSummary = (text: string): string => {
         return `${prefix}tháng ${m.padStart(2, '0')} năm ${currentYear}`;
     });
     
+    // 3. VIẾT HOA LẠI CHỮ CÁI ĐẦU TIÊN CỦA CÂU
     if (summary.length > 0) {
-        summary = summary.charAt(0).toUpperCase() + summary.slice(1).toLowerCase();
+        summary = summary.charAt(0).toUpperCase() + summary.slice(1);
     }
     return summary.trim();
 };
 
-// "CẢNH SÁT KIỂM DUYỆT" - Khóa cứng trật tự XML chuẩn MS Word
+const isParagraphBold = (p: Element): boolean => {
+    const runs = Array.from(p.getElementsByTagNameNS(W_NS, "r"));
+    for (const r of runs) {
+        const t = r.getElementsByTagNameNS(W_NS, "t")[0];
+        if (t && t.textContent && t.textContent.trim().length > 0) {
+            const rPr = r.getElementsByTagNameNS(W_NS, "rPr")[0];
+            if (rPr) {
+                const b = rPr.getElementsByTagNameNS(W_NS, "b")[0];
+                if (b) {
+                    const val = b.getAttributeNS(W_NS, "val");
+                    if (val !== "false" && val !== "0") return true;
+                }
+            }
+        }
+    }
+    return false;
+};
+
 const enforceSchema = (doc: Document) => {
     const orders: Record<string, string[]> = {
         "w:pPr": ["w:pStyle", "w:spacing", "w:ind", "w:jc", "w:rPr"],
@@ -104,7 +140,6 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       return false;
     };
 
-    // --- BƯỚC 1: DỌN DẸP RÁC ---
     const paragraphsForCleaning = Array.from(doc.getElementsByTagNameNS(W_NS, "p"));
     for (const p of paragraphsForCleaning) {
         const textNodes = Array.from(p.getElementsByTagNameNS(W_NS, "t"));
@@ -159,7 +194,6 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       pgMar.setAttributeNS(W_NS, "w:right", String(Math.round(options.margins.right * TWIPS_PER_CM)));
     }
 
-    // --- BƯỚC 2: KHÓA MỤC TIÊU TIÊU ĐỀ & TRÍCH YẾU ---
     const rebuildParagraph = (p: Element, text: string, isBold: boolean, fontSize: string, isTitle: boolean) => {
         Array.from(p.childNodes).forEach(child => {
             if (child.nodeName !== "w:pPr") p.removeChild(child);
@@ -236,6 +270,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         tcW.setAttributeNS(W_NS, "w:w", "1500");
         tcW.setAttributeNS(W_NS, "w:type", "dxa");
         tcPr.appendChild(tcW);
+        
         const tcMar = doc.createElementNS(W_NS, "w:tcMar");
         ["top", "bottom", "left", "right"].forEach(side => {
             const mar = doc.createElementNS(W_NS, `w:${side}`);
@@ -244,6 +279,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
             tcMar.appendChild(mar);
         });
         tcPr.appendChild(tcMar);
+
         const tcBorders = doc.createElementNS(W_NS, "w:tcBorders");
         const top = doc.createElementNS(W_NS, "w:top");
         top.setAttributeNS(W_NS, "w:val", "single");
@@ -335,7 +371,8 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         if (matchedKeyword) {
             docTypeElements.add(p);
             detectedDocType = matchedKeyword; 
-            let summaryP: Element | null = null;
+            
+            const summaryParagraphs: Element[] = [];
             const originalUpper = text.toUpperCase();
             const keywordIndex = originalUpper.indexOf(matchedKeyword);
             const remainingText = text.slice(keywordIndex + matchedKeyword.length).trim();
@@ -346,29 +383,52 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                 const newP = doc.createElementNS(W_NS, "w:p");
                 if (p.nextSibling) p.parentNode?.insertBefore(newP, p.nextSibling);
                 else p.parentNode?.appendChild(newP);
-                summaryP = newP;
-                rebuildParagraph(summaryP, normalizeSummary(remainingText), true, String(options.font.sizeNormal * 2), false); 
-                abstractElements.add(newP);
-            } else {
-                for (let step = 1; step <= 3; step++) {
-                    if (i + step < paragraphs.length) {
-                        const tempP = paragraphs[i + step];
-                        if (isTableParagraph(tempP)) break;
-                        const tempText = tempP.textContent?.trim() || "";
-                        if (tempText.length > 0) {
-                            summaryP = tempP;
-                            rebuildParagraph(summaryP, normalizeSummary(tempText), true, String(options.font.sizeNormal * 2), false); 
-                            abstractElements.add(summaryP);
-                            for(let k = 1; k < step; k++){
-                                abstractElements.add(paragraphs[i+k]);
-                            }
-                            break;
-                        }
-                    }
-                }
+                summaryParagraphs.push(newP);
+                rebuildParagraph(newP, normalizeSummary(remainingText), true, String(options.font.sizeNormal * 2), false); 
             }
 
-            const targetNode = summaryP || p;
+            let linesCaptured = 0;
+            let currentIndex = i + 1; 
+            let hasFoundBoldSummary = false; 
+
+            while (currentIndex < paragraphs.length && linesCaptured < 8) { 
+                const tempP = paragraphs[currentIndex];
+                if (isTableParagraph(tempP)) break;
+                const tempText = tempP.textContent?.trim() || "";
+
+                if (tempText.length > 0) {
+                    const upperText = tempText.toUpperCase();
+                    
+                    if (tempText.startsWith("Căn cứ") || tempText.startsWith("Xét") || tempText.startsWith("Theo") || tempText.startsWith("Kính gửi") || tempText.startsWith("Hôm nay") || tempText.startsWith("Thời gian:") || tempText.startsWith("Đồng kính gửi")) break;
+                    if (upperText === tempText && /[A-ZÀ-Ỹ]/.test(upperText) && tempText.length < 150) break;
+                    if (/^([IVXLCDM]+|[0-9]+)[\.\)]\s/.test(tempText)) break;
+                    if (tempText.length > 250) break; 
+
+                    const isBold = isParagraphBold(tempP);
+                    
+                    if (hasFoundBoldSummary && !isBold) {
+                        break;
+                    }
+
+                    if (isBold) {
+                        hasFoundBoldSummary = true;
+                    }
+
+                    if (!hasFoundBoldSummary && linesCaptured >= 3) break;
+
+                    summaryParagraphs.push(tempP);
+                    rebuildParagraph(tempP, normalizeSummary(tempText), true, String(options.font.sizeNormal * 2), false); 
+                    linesCaptured++;
+                } else {
+                    abstractElements.add(tempP);
+                }
+                currentIndex++;
+            }
+
+            summaryParagraphs.forEach(sp => abstractElements.add(sp));
+
+            const targetNode = summaryParagraphs.length > 0 ? summaryParagraphs[summaryParagraphs.length - 1] : p;
+            
             if (options.headerType === HeaderType.PARTY) {
                 const dashP = createPartyDashLine(protectedElements);
                 if (targetNode.nextSibling) targetNode.parentNode?.insertBefore(dashP, targetNode.nextSibling);
@@ -382,7 +442,6 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         }
     }
 
-    // --- BƯỚC 3: CĂN CHỈNH NỘI DUNG VĂN BẢN BÊN DƯỚI VÀ NHẬN DIỆN "QUYẾT ĐỊNH" ---
     const finalParagraphs = Array.from(doc.getElementsByTagNameNS(W_NS, "p"));
     for (const p of finalParagraphs) {
       if (docTypeElements.has(p) || abstractElements.has(p) || protectedElements.has(p)) continue; 
@@ -505,7 +564,6 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         }
     }
 
-    // --- BƯỚC 4: MẺ LƯỚI SẮT ÉP FONT TIMES NEW ROMAN 100% ---
     const allRunsInDoc = Array.from(doc.getElementsByTagNameNS(W_NS, "r"));
     for (const r of allRunsInDoc) { getOrCreate(r, "w:rPr"); }
     const allPPrsInDoc = Array.from(doc.getElementsByTagNameNS(W_NS, "pPr"));
@@ -576,7 +634,6 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
 
     enforceSchema(doc);
 
-    // --- STEP 7: AUTO PAGE NUMBERING ---
     const fontSize = options.font.sizeTable * 2;
     const fontFamily = options.font.family;
     const headerXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -597,7 +654,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
             </w:r>
             <w:r>
                 <w:rPr><w:rFonts w:ascii="${fontFamily}" w:hAnsi="${fontFamily}" w:cs="${fontFamily}" w:eastAsia="${fontFamily}"/><w:sz w:val="${fontSize}"/><w:szCs w:val="${fontSize}"/><w:noProof/></w:rPr>
-                <w:t>2</w:t>
+                <w:t></w:t>
             </w:r>
             <w:r>
                 <w:rPr><w:rFonts w:ascii="${fontFamily}" w:hAnsi="${fontFamily}" w:cs="${fontFamily}" w:eastAsia="${fontFamily}"/><w:sz w:val="${fontSize}"/><w:szCs w:val="${fontSize}"/></w:rPr>
@@ -722,8 +779,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         const szCs = getOrCreate(rPr, "w:szCs");
         szCs.setAttributeNS(W_NS, "w:val", String(sizeToUse));
         if (isBold) rPr.appendChild(createElement("w:b"));
-        const u = getOrCreate(rPr, "w:u");
-        u.setAttributeNS(W_NS, "w:val", "single"); 
+        
         const t = createElement("w:t");
         t.textContent = text;
         r.appendChild(t);
@@ -764,10 +820,65 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
         const tcW = getOrCreate(tcPr, "w:tcW");
         tcW.setAttributeNS(W_NS, "w:w", "1000");
         tcW.setAttributeNS(W_NS, "w:type", "dxa");
+        
+        const tcMar = getOrCreate(tcPr, "w:tcMar");
+        ["top", "bottom", "left", "right"].forEach(side => {
+            const mar = getOrCreate(tcMar, `w:${side}`);
+            mar.setAttributeNS(W_NS, "w:w", "0");
+            mar.setAttributeNS(W_NS, "w:type", "dxa");
+        });
+
         const tcBorders = getOrCreate(tcPr, "w:tcBorders");
         const top = getOrCreate(tcBorders, "w:top"); 
         top.setAttributeNS(W_NS, "w:val", "single");
         top.setAttributeNS(W_NS, "w:sz", "4"); 
+        top.setAttributeNS(W_NS, "w:space", "0");
+        top.setAttributeNS(W_NS, "w:color", "000000");
+        const p = createElement("w:p");
+        tc.appendChild(p);
+        const pPr = getOrCreate(p, "w:pPr");
+        const spacing = getOrCreate(pPr, "w:spacing");
+        spacing.setAttributeNS(W_NS, "w:before", "0");
+        spacing.setAttributeNS(W_NS, "w:after", "0");
+        spacing.setAttributeNS(W_NS, "w:line", "24"); 
+        spacing.setAttributeNS(W_NS, "w:lineRule", "exact");
+        return tbl;
+    };
+
+    const createMottoLineTable = (widthTwips: string): Element => {
+        const tbl = createElement("w:tbl");
+        const tblPr = getOrCreate(tbl, "w:tblPr");
+        const jcTbl = getOrCreate(tblPr, "w:jc");
+        jcTbl.setAttributeNS(W_NS, "w:val", "center");
+        const tblW = getOrCreate(tblPr, "w:tblW");
+        tblW.setAttributeNS(W_NS, "w:w", widthTwips);
+        tblW.setAttributeNS(W_NS, "w:type", "dxa");
+        const tblLayout = getOrCreate(tblPr, "w:tblLayout");
+        tblLayout.setAttributeNS(W_NS, "w:type", "fixed");
+        const tblGrid = getOrCreate(tbl, "w:tblGrid");
+        const gridCol = createElement("w:gridCol");
+        gridCol.setAttributeNS(W_NS, "w:w", widthTwips);
+        tblGrid.appendChild(gridCol);
+        const tr = createElement("w:tr");
+        tbl.appendChild(tr);
+        const tc = createElement("w:tc");
+        tr.appendChild(tc);
+        const tcPr = getOrCreate(tc, "w:tcPr");
+        const tcW = getOrCreate(tcPr, "w:tcW");
+        tcW.setAttributeNS(W_NS, "w:w", widthTwips);
+        tcW.setAttributeNS(W_NS, "w:type", "dxa");
+
+        const tcMar = getOrCreate(tcPr, "w:tcMar");
+        ["top", "bottom", "left", "right"].forEach(side => {
+            const mar = getOrCreate(tcMar, `w:${side}`);
+            mar.setAttributeNS(W_NS, "w:w", "0");
+            mar.setAttributeNS(W_NS, "w:type", "dxa");
+        });
+
+        const tcBorders = getOrCreate(tcPr, "w:tcBorders");
+        const top = getOrCreate(tcBorders, "w:top"); 
+        top.setAttributeNS(W_NS, "w:val", "single");
+        top.setAttributeNS(W_NS, "w:sz", "6"); 
         top.setAttributeNS(W_NS, "w:space", "0");
         top.setAttributeNS(W_NS, "w:color", "000000");
         const p = createElement("w:p");
@@ -798,10 +909,10 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
 
     const tblGrid = getOrCreate(tbl, "w:tblGrid");
     const col1 = createElement("w:gridCol");
-    col1.setAttributeNS(W_NS, "w:w", "4000"); 
+    col1.setAttributeNS(W_NS, "w:w", "3800"); 
     tblGrid.appendChild(col1);
     const col2 = createElement("w:gridCol");
-    col2.setAttributeNS(W_NS, "w:w", "5350"); 
+    col2.setAttributeNS(W_NS, "w:w", "5550"); 
     tblGrid.appendChild(col2);
 
     const tr = createElement("w:tr");
@@ -811,15 +922,29 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
     tr.appendChild(tc1);
     const tc1Pr = getOrCreate(tc1, "w:tcPr");
     const tc1W = getOrCreate(tc1Pr, "w:tcW");
-    tc1W.setAttributeNS(W_NS, "w:w", "4000");
+    tc1W.setAttributeNS(W_NS, "w:w", "3800");
     tc1W.setAttributeNS(W_NS, "w:type", "dxa");
+    
+    const tc1Mar = getOrCreate(tc1Pr, "w:tcMar");
+    ["top", "bottom", "left", "right"].forEach(side => {
+        const mar = getOrCreate(tc1Mar, `w:${side}`);
+        mar.setAttributeNS(W_NS, "w:w", "0");
+        mar.setAttributeNS(W_NS, "w:type", "dxa");
+    });
     
     const tc2 = createElement("w:tc");
     tr.appendChild(tc2);
     const tc2Pr = getOrCreate(tc2, "w:tcPr");
     const tc2W = getOrCreate(tc2Pr, "w:tcW");
-    tc2W.setAttributeNS(W_NS, "w:w", "5350");
+    tc2W.setAttributeNS(W_NS, "w:w", "5550");
     tc2W.setAttributeNS(W_NS, "w:type", "dxa");
+
+    const tc2Mar = getOrCreate(tc2Pr, "w:tcMar");
+    ["top", "bottom", "left", "right"].forEach(side => {
+        const mar = getOrCreate(tc2Mar, `w:${side}`);
+        mar.setAttributeNS(W_NS, "w:w", "0");
+        mar.setAttributeNS(W_NS, "w:type", "dxa");
+    });
 
     const docDate = options.documentDate ? new Date(options.documentDate) : new Date();
     const day = String(docDate.getDate()).padStart(2, '0');
@@ -835,7 +960,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
             tc1.appendChild(createStyledP("Số: ... - .../CB", false, false));
 
             tc2.appendChild(createMottoP("ĐẢNG CỘNG SẢN VIỆT NAM", true, 13)); 
-            tc2.appendChild(createStyledP("", false, false));
+            appendSafeTable(tc2, createMottoLineTable("3400")); 
             tc2.appendChild(createStyledP("", false, false));
             tc2.appendChild(createStyledP(currentDateStr, false, true, 14));
             break;
@@ -850,6 +975,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
 
             tc2.appendChild(createStyledP("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", true, false, 13));
             tc2.appendChild(createMottoP("Độc lập - Tự do - Hạnh phúc", true, 13)); 
+            appendSafeTable(tc2, createMottoLineTable("3200")); 
             tc2.appendChild(createStyledP("", false, false)); 
             tc2.appendChild(createStyledP(currentDateStr, false, true, 14));
             break;
@@ -864,6 +990,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
 
             tc2.appendChild(createStyledP("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", true, false, 13));
             tc2.appendChild(createMottoP("Độc lập - Tự do - Hạnh phúc", true, 13)); 
+            appendSafeTable(tc2, createMottoLineTable("3200")); 
             tc2.appendChild(createStyledP("", false, false)); 
             tc2.appendChild(createStyledP(currentDateStr, false, true, 14));
             break;
@@ -942,8 +1069,9 @@ const createSignatureBlock = (doc: Document, options: any, docType: string): Ele
     tblW.setAttributeNS(W_NS, "w:type", "dxa"); 
 
     const isMinutes = (docType && docType.toUpperCase().includes("BIÊN BẢN")) || options.isMinutes === true;
-    const w1 = isMinutes ? "4675" : "4000";
-    const w2 = isMinutes ? "4675" : "5350";
+    
+    const w1 = isMinutes ? "4675" : "3800";
+    const w2 = isMinutes ? "4675" : "5550";
 
     const tblGrid = getOrCreate(tbl, "w:tblGrid");
     const col1 = createElement("w:gridCol");
@@ -962,6 +1090,13 @@ const createSignatureBlock = (doc: Document, options: any, docType: string): Ele
     const tc1W = getOrCreate(tc1Pr, "w:tcW");
     tc1W.setAttributeNS(W_NS, "w:w", w1);
     tc1W.setAttributeNS(W_NS, "w:type", "dxa");
+    
+    const tc1Mar = getOrCreate(tc1Pr, "w:tcMar");
+    ["top", "bottom", "left", "right"].forEach(side => {
+        const mar = getOrCreate(tc1Mar, `w:${side}`);
+        mar.setAttributeNS(W_NS, "w:w", "0");
+        mar.setAttributeNS(W_NS, "w:type", "dxa");
+    });
 
     const tc2 = createElement("w:tc");
     tr.appendChild(tc2);
@@ -969,6 +1104,13 @@ const createSignatureBlock = (doc: Document, options: any, docType: string): Ele
     const tc2W = getOrCreate(tc2Pr, "w:tcW");
     tc2W.setAttributeNS(W_NS, "w:w", w2);
     tc2W.setAttributeNS(W_NS, "w:type", "dxa");
+    
+    const tc2Mar = getOrCreate(tc2Pr, "w:tcMar");
+    ["top", "bottom", "left", "right"].forEach(side => {
+        const mar = getOrCreate(tc2Mar, `w:${side}`);
+        mar.setAttributeNS(W_NS, "w:w", "0");
+        mar.setAttributeNS(W_NS, "w:type", "dxa");
+    });
 
     const signerTitle = options.signerTitle ? options.signerTitle.trim().toUpperCase() : "";
     const signerName = options.signerName ? options.signerName.trim() : "";
