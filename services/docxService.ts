@@ -6,8 +6,10 @@ const TWIPS_PER_CM = 567;
 const TWIPS_PER_PT = 20;
 
 const DOC_TYPE_KEYWORDS = [
-  "NGHỊ QUYẾT", "QUYẾT ĐỊNH", "THÔNG BÁO", "BÁO CÁO", "TỜ TRÌNH", 
-  "KẾ HOẠCH", "CHƯƠNG TRÌNH", "CÔNG VĂN", "GIẤY MỜI", "BIÊN BẢN"
+  "NGHỊ QUYẾT", "QUYẾT ĐỊNH", "CHỈ THỊ", "KẾT LUẬN", "QUY CHẾ", "QUY ĐỊNH", 
+  "HƯỚNG DẪN", "BÁO CÁO", "KẾ HOẠCH", "CHƯƠNG TRÌNH", "THÔNG BÁO", "THÔNG TRI", 
+  "CÔNG VĂN", "TỜ TRÌNH", "BIÊN BẢN", "PHƯƠNG ÁN", "ĐỀ ÁN", "DỰ ÁN", 
+  "HỢP ĐỒNG", "BẢN THỎA THUẬN", "GIẤY ỦY QUYỀN", "GIẤY MỜI", "GIẤY GIỚI THIỆU", "GIẤY NGHỈ PHÉP"
 ];
 
 const DEFAULT_OPTIONS: DocxOptions = {
@@ -19,30 +21,54 @@ const DEFAULT_OPTIONS: DocxOptions = {
   table: { rowHeight: 0.8 }
 };
 
-// MÀNG LỌC THÔNG MINH XỬ LÝ TRÍCH YẾU
-const normalizeSummary = (text: string): string => {
-    let summary = text.trim();
-    if (!summary) return "";
-    summary = summary.replace(/^[:-]\s*/, '').trim();
-    
-    // 1. CHUYỂN IN THƯỜNG CÓ CHỌN LỌC (BẢO VỆ HUE-ICT, 2026 VÀ TỪ VIẾT TẮT)
+const ACRONYMS_LIST = [
+  "UBND", "THCS", "THPT", "BGDĐT", "SGDĐT", "PGDĐT", "ĐTN", "CĐ", "ĐCS", "VN", 
+  "GDĐT", "CNTT", "KHTN", "KHXH", "GDCD", "TDTT", "BCH", "CSCS", "CMHS", "ĐĐ", 
+  "BĐD", "STT", "GV", "HS", "SKKN",
+  "NQ", "QĐ", "CT", "KL", "QC", "QYĐ", "HD", "BC", "KH", "CTR", "TB", "TTR", "CV", "BB",
+  "PA", "ĐA", "DA", "HĐ", "BTT", "GUQ", "GM", "GGT", "GNP"
+];
+
+const smartNormalizeText = (text: string): string => {
+    let t = text.trim();
+    if (!t) return "";
     const lowerRegex = /[a-zàáâãèéêìíòóôõùúăđĩũơưạảấầẩẫậắằẳẵặẹẻẽềềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳýỷỹỵ]/;
     const specialRegex = /[0-9\-\/]/;
     
-    summary = summary.split(/\s+/).map(word => {
-        // Nếu từ chứa chữ thường, số, gạch nối, gạch chéo -> Có khiên bảo vệ, bỏ qua!
+    t = t.split(/\s+/).map(word => {
         if (lowerRegex.test(word) || specialRegex.test(word)) {
             return word;
         }
-        // Nếu từ IN HOA TOÀN BỘ -> Hạ cấp thành in thường, TRỪ các từ nằm trong danh sách viết tắt
         return word.replace(/[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼỀỀỂỄỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲÝỶỸỴ]+/g, (match) => {
-            const acronyms = ["UBND", "THCS", "THPT", "BGDĐT", "SGDĐT", "PGDĐT", "ĐTN", "CĐ", "ĐCS", "VN", "GDĐT", "CNTT", "KHTN", "KHXH", "GDCD", "TDTT", "BCH", "CSCS", "CMHS", "ĐĐ", "BĐD"];
-            if (acronyms.includes(match)) return match;
+            if (ACRONYMS_LIST.includes(match)) return match;
             return match.toLowerCase();
         });
     }).join(' ');
 
-    // 2. CHUẨN HÓA NGÀY THÁNG NĂM
+    if (t.length > 0) {
+        t = t.charAt(0).toUpperCase() + t.slice(1);
+    }
+    return t;
+};
+
+const normalizeTableHeader = (text: string): string => {
+    let t = text.trim();
+    if (!t) return "";
+    t = t.toLowerCase();
+    t = t.charAt(0).toUpperCase() + t.slice(1);
+    ACRONYMS_LIST.forEach(acro => {
+        const regex = new RegExp(`\\b${acro.toLowerCase()}\\b`, 'gi');
+        t = t.replace(regex, acro);
+    });
+    return t;
+};
+
+const normalizeSummary = (text: string): string => {
+    let summary = text.trim();
+    if (!summary) return "";
+    summary = summary.replace(/^[:-]\s*/, '').trim();
+    summary = smartNormalizeText(summary);
+    
     summary = summary.replace(/(^|\s)(?:-|–)?\s*tháng\s+(\d{1,2})(?:\/|-)(\d{4})/gi, (match, prefix, m, y) => {
         return `${prefix}tháng ${m.padStart(2, '0')} năm ${y}`;
     });
@@ -52,10 +78,6 @@ const normalizeSummary = (text: string): string => {
         return `${prefix}tháng ${m.padStart(2, '0')} năm ${currentYear}`;
     });
     
-    // 3. VIẾT HOA LẠI CHỮ CÁI ĐẦU TIÊN CỦA CÂU
-    if (summary.length > 0) {
-        summary = summary.charAt(0).toUpperCase() + summary.slice(1);
-    }
     return summary.trim();
 };
 
@@ -79,12 +101,41 @@ const isParagraphBold = (p: Element): boolean => {
 
 const enforceSchema = (doc: Document) => {
     const orders: Record<string, string[]> = {
-        "w:pPr": ["w:pStyle", "w:spacing", "w:ind", "w:jc", "w:rPr"],
-        "w:rPr": ["w:rFonts", "w:b", "w:bCs", "w:i", "w:iCs", "w:color", "w:sz", "w:szCs", "w:u"],
-        "w:tblPr": ["w:tblW", "w:jc", "w:tblBorders", "w:tblLayout"],
-        "w:tcPr": ["w:tcW", "w:tcBorders", "w:tcMar", "w:vAlign"],
-        "w:r": ["w:rPr", "w:t"] 
+        "w:pPr": [
+            "w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr", "w:widowControl", 
+            "w:numPr", "w:suppressLineNumbers", "w:pBdr", "w:shd", "w:tabs", "w:suppressAutoHyphens", 
+            "w:kinsoku", "w:wordWrap", "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN", 
+            "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind", "w:contextualSpacing", 
+            "w:mirrorIndents", "w:suppressOverlap", "w:jc", "w:textDirection", "w:textAlignment", 
+            "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange"
+        ],
+        "w:rPr": [
+            "w:rStyle", "w:rFonts", "w:b", "w:bCs", "w:i", "w:iCs", "w:caps", "w:smallCaps", "w:strike", 
+            "w:dstrike", "w:outline", "w:shadow", "w:emboss", "w:imprint", "w:noProof", "w:snapToGrid", 
+            "w:color", "w:spacing", "w:w", "w:kern", "w:position", "w:sz", "w:szCs", "w:highlight", "w:u", 
+            "w:effect", "w:bdr", "w:shd", "w:fitText", "w:vertAlign", "w:rtl", "w:cs", "w:em", "w:lang", 
+            "w:eastAsianLayout", "w:specVanish", "w:oMath", "w:rPrChange"
+        ],
+        "w:tblPr": [
+            "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual", "w:tblStyleRowBandSize", 
+            "w:tblStyleColBandSize", "w:tblW", "w:jc", "w:tblCellSpacing", "w:tblInd", "w:tblBorders", 
+            "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription", "w:tblPrChange"
+        ],
+        "w:trPr": [
+            "w:cnfStyle", "w:divId", "w:gridBefore", "w:gridAfter", "w:wBefore", "w:wAfter", "w:cantSplit", 
+            "w:trHeight", "w:tblHeader", "w:tblCellSpacing", "w:jc", "w:hidden", "w:trPrChange"
+        ],
+        "w:tcPr": [
+            "w:cnfStyle", "w:tcW", "w:gridSpan", "w:hMerge", "w:vMerge", "w:tcBorders", "w:shd", "w:noWrap", 
+            "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark", "w:headers", "w:cellIns", 
+            "w:cellDel", "w:tcPrChange"
+        ],
+        "w:r": [
+            "w:rPr", "w:t", "w:br", "w:tab", "w:drawing", "w:pict", "w:object", "w:sym", "w:fldChar", 
+            "w:instrText", "w:delText", "w:insText"
+        ]
     };
+
     Object.keys(orders).forEach(tagName => {
         const localName = tagName.split(":")[1];
         const elements = Array.from(doc.getElementsByTagNameNS(W_NS, localName));
@@ -92,14 +143,15 @@ const enforceSchema = (doc: Document) => {
             const order = orders[tagName];
             const children = Array.from(el.childNodes);
             children.sort((a, b) => {
-                const nameA = a.nodeName;
-                const nameB = b.nodeName;
+                const nameA = a.nodeName.includes(":") ? a.nodeName : `w:${a.nodeName}`;
+                const nameB = b.nodeName.includes(":") ? b.nodeName : `w:${b.nodeName}`;
                 const indexA = order.indexOf(nameA);
                 const indexB = order.indexOf(nameB);
-                if (indexA === -1 && indexB === -1) return 0;
-                if (indexA === -1) return 1;
-                if (indexB === -1) return -1;
-                return indexA - indexB;
+
+                if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+                if (indexA === -1 && indexB !== -1) return -1;
+                if (indexA !== -1 && indexB === -1) return 1;
+                return 0;
             });
             children.forEach(c => el.appendChild(c));
         });
@@ -119,6 +171,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
 
     const parser = new DOMParser();
     const doc = parser.parseFromString(docXmlContent, "application/xml");
+    const body = doc.getElementsByTagNameNS(W_NS, "body")[0];
     
     const createElement = (tagName: string) => doc.createElementNS(W_NS, tagName);
     const getOrCreate = (parent: Element, tagName: string): Element => {
@@ -180,18 +233,33 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         }
     }
 
-    const body = doc.getElementsByTagNameNS(W_NS, "body")[0];
-    if (body) {
-      const sectPr = getOrCreate(body, "w:sectPr");
-      const pgSz = getOrCreate(sectPr, "w:pgSz");
-      pgSz.setAttributeNS(W_NS, "w:w", String(Math.round(21 * TWIPS_PER_CM)));
-      pgSz.setAttributeNS(W_NS, "w:h", String(Math.round(29.7 * TWIPS_PER_CM)));
-      pgSz.setAttributeNS(W_NS, "w:orient", "portrait");
-      const pgMar = getOrCreate(sectPr, "w:pgMar");
-      pgMar.setAttributeNS(W_NS, "w:top", String(Math.round(options.margins.top * TWIPS_PER_CM)));
-      pgMar.setAttributeNS(W_NS, "w:bottom", String(Math.round(options.margins.bottom * TWIPS_PER_CM)));
-      pgMar.setAttributeNS(W_NS, "w:left", String(Math.round(options.margins.left * TWIPS_PER_CM)));
-      pgMar.setAttributeNS(W_NS, "w:right", String(Math.round(options.margins.right * TWIPS_PER_CM)));
+    const sectPrsDoc = Array.from(doc.getElementsByTagNameNS(W_NS, "sectPr"));
+    for (const sectPr of sectPrsDoc) {
+        const pgSz = getOrCreate(sectPr, "w:pgSz");
+        const wStr = pgSz.getAttributeNS(W_NS, "w");
+        const hStr = pgSz.getAttributeNS(W_NS, "h");
+        const orient = pgSz.getAttributeNS(W_NS, "orient");
+
+        let w = parseInt(wStr || "0");
+        let h = parseInt(hStr || "0");
+        
+        let isLandscape = orient === "landscape" || w > h;
+
+        if (isLandscape) {
+            pgSz.setAttributeNS(W_NS, "w", String(Math.round(29.7 * TWIPS_PER_CM)));
+            pgSz.setAttributeNS(W_NS, "w:h", String(Math.round(21 * TWIPS_PER_CM)));
+            pgSz.setAttributeNS(W_NS, "w:orient", "landscape");
+        } else {
+            pgSz.setAttributeNS(W_NS, "w", String(Math.round(21 * TWIPS_PER_CM)));
+            pgSz.setAttributeNS(W_NS, "w:h", String(Math.round(29.7 * TWIPS_PER_CM)));
+            pgSz.setAttributeNS(W_NS, "w:orient", "portrait");
+        }
+
+        const pgMar = getOrCreate(sectPr, "w:pgMar");
+        pgMar.setAttributeNS(W_NS, "w:top", String(Math.round(options.margins.top * TWIPS_PER_CM)));
+        pgMar.setAttributeNS(W_NS, "w:bottom", String(Math.round(options.margins.bottom * TWIPS_PER_CM)));
+        pgMar.setAttributeNS(W_NS, "w:left", String(Math.round(options.margins.left * TWIPS_PER_CM)));
+        pgMar.setAttributeNS(W_NS, "w:right", String(Math.round(options.margins.right * TWIPS_PER_CM)));
     }
 
     const rebuildParagraph = (p: Element, text: string, isBold: boolean, fontSize: string, isTitle: boolean) => {
@@ -400,7 +468,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                     const upperText = tempText.toUpperCase();
                     
                     if (tempText.startsWith("Căn cứ") || tempText.startsWith("Xét") || tempText.startsWith("Theo") || tempText.startsWith("Kính gửi") || tempText.startsWith("Hôm nay") || tempText.startsWith("Thời gian:") || tempText.startsWith("Đồng kính gửi")) break;
-                    if (upperText === tempText && /[A-ZÀ-Ỹ]/.test(upperText) && tempText.length < 150) break;
+                    
                     if (/^([IVXLCDM]+|[0-9]+)[\.\)]\s/.test(tempText)) break;
                     if (tempText.length > 250) break; 
 
@@ -447,12 +515,14 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       if (docTypeElements.has(p) || abstractElements.has(p) || protectedElements.has(p)) continue; 
       
       const isTable = isTableParagraph(p);
+      if (isTable) continue; 
+      
       const pPr = getOrCreate(p, "w:pPr");
       const pText = p.textContent?.trim() || "";
       const upperText = pText.toUpperCase();
 
       let isDecisionSpecialLine = false;
-      if (detectedDocType === "QUYẾT ĐỊNH" && !isTable && pText.length > 0) {
+      if (detectedDocType === "QUYẾT ĐỊNH" && pText.length > 0) {
           if (upperText === "QUYẾT ĐỊNH:" || upperText === "QUYẾT ĐỊNH") {
               isDecisionSpecialLine = true;
           } 
@@ -489,29 +559,19 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         continue; 
       }
 
-      if (!isTable) {
-        const jc = getOrCreate(pPr, "w:jc");
-        jc.setAttributeNS(W_NS, "w:val", "both");
-        const spacing = getOrCreate(pPr, "w:spacing");
-        spacing.setAttributeNS(W_NS, "w:before", "0");
-        spacing.setAttributeNS(W_NS, "w:after", String(Math.round(options.paragraph.after * TWIPS_PER_PT)));
-        spacing.setAttributeNS(W_NS, "w:line", String(Math.round(options.paragraph.lineSpacing * 240))); 
-        spacing.setAttributeNS(W_NS, "w:lineRule", "auto");
-        const ind = getOrCreate(pPr, "w:ind");
-        ind.setAttributeNS(W_NS, "w:left", "0");
-        ind.setAttributeNS(W_NS, "w:right", "0");
-        ind.setAttributeNS(W_NS, "w:firstLine", String(Math.round(options.paragraph.indent * TWIPS_PER_CM)));
-      } else {
-        const jc = getOrCreate(pPr, "w:jc");
-        jc.setAttributeNS(W_NS, "w:val", "center");
-        const ind = getOrCreate(pPr, "w:ind");
-        ind.setAttributeNS(W_NS, "w:left", "0");
-        ind.setAttributeNS(W_NS, "w:right", "0");
-        ind.setAttributeNS(W_NS, "w:firstLine", "0");
-        ind.removeAttributeNS(W_NS, "hanging");
-      }
+      const jc = getOrCreate(pPr, "w:jc");
+      jc.setAttributeNS(W_NS, "w:val", "both");
+      const spacing = getOrCreate(pPr, "w:spacing");
+      spacing.setAttributeNS(W_NS, "w:before", "0");
+      spacing.setAttributeNS(W_NS, "w:after", String(Math.round(options.paragraph.after * TWIPS_PER_PT)));
+      spacing.setAttributeNS(W_NS, "w:line", String(Math.round(options.paragraph.lineSpacing * 240))); 
+      spacing.setAttributeNS(W_NS, "w:lineRule", "auto");
+      const ind = getOrCreate(pPr, "w:ind");
+      ind.setAttributeNS(W_NS, "w:left", "0");
+      ind.setAttributeNS(W_NS, "w:right", "0");
+      ind.setAttributeNS(W_NS, "w:firstLine", String(Math.round(options.paragraph.indent * TWIPS_PER_CM)));
       
-      const targetSize = isTable ? (options.font.sizeTable * 2) : (options.font.sizeNormal * 2);
+      const targetSize = options.font.sizeNormal * 2;
       const runs = Array.from(p.getElementsByTagNameNS(W_NS, "r"));
       for (const r of runs) {
           const rPr = getOrCreate(r, "w:rPr");
@@ -525,21 +585,114 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
     const tables = Array.from(doc.getElementsByTagNameNS(W_NS, "tbl"));
     for (const tbl of tables) {
         if (lineTables.has(tbl)) continue;
+        
+        let sttColIndex = -1;
+
         const rows = Array.from(tbl.getElementsByTagNameNS(W_NS, "tr"));
-        for (const tr of rows) {
+        for (let rIndex = 0; rIndex < rows.length; rIndex++) {
+            const tr = rows[rIndex];
             const trPr = getOrCreate(tr, "w:trPr");
-            let trHeight = trPr.getElementsByTagNameNS(W_NS, "trHeight")[0];
-            if (!trHeight) {
-                trHeight = doc.createElementNS(W_NS, "w:trHeight");
-                trHeight.setAttributeNS(W_NS, "w:val", String(Math.round(options.table.rowHeight * TWIPS_PER_CM)));
-                trHeight.setAttributeNS(W_NS, "w:hRule", "atLeast");
-                trPr.appendChild(trHeight);
+
+            let isHeaderRow = (rIndex === 0);
+            if (!isHeaderRow && trPr.getElementsByTagNameNS(W_NS, "tblHeader").length > 0) {
+                isHeaderRow = true;
             }
+
+            let trHeight = getOrCreate(trPr, "w:trHeight");
+            trHeight.setAttributeNS(W_NS, "w:val", String(Math.round(options.table.rowHeight * TWIPS_PER_CM))); 
+            trHeight.setAttributeNS(W_NS, "w:hRule", "atLeast"); 
+
             const cells = Array.from(tr.getElementsByTagNameNS(W_NS, "tc"));
+            let logicalColIndex = 0;
+
             for (const tc of cells) {
                 const tcPr = getOrCreate(tc, "w:tcPr");
                 const vAlign = getOrCreate(tcPr, "w:vAlign");
-                vAlign.setAttributeNS(W_NS, "w:val", "center");
+                vAlign.setAttributeNS(W_NS, "w:val", "center"); 
+                
+                const gridSpanEl = tcPr.getElementsByTagNameNS(W_NS, "gridSpan")[0];
+                const gridSpan = gridSpanEl ? parseInt(gridSpanEl.getAttributeNS(W_NS, "val") || "1") : 1;
+
+                const tcParagraphs = Array.from(tc.getElementsByTagNameNS(W_NS, "p"));
+                
+                if (isHeaderRow) {
+                    const cellFullText = tc.textContent || "";
+                    const cleanText = cellFullText.toUpperCase().replace(/\./g, '').trim();
+                    if (cleanText === "STT" || cleanText === "SỐ TT") {
+                        sttColIndex = logicalColIndex;
+                    }
+                }
+
+                for (const p of tcParagraphs) {
+                    const pPr = getOrCreate(p, "w:pPr");
+                    const jc = getOrCreate(pPr, "w:jc");
+                    
+                    if (isHeaderRow || logicalColIndex === sttColIndex) {
+                        jc.setAttributeNS(W_NS, "w:val", "center");
+                    } else {
+                        jc.setAttributeNS(W_NS, "w:val", "left");
+                    }
+                    
+                    const ind = getOrCreate(pPr, "w:ind");
+                    ind.setAttributeNS(W_NS, "w:left", "0");
+                    ind.setAttributeNS(W_NS, "w:right", "0");
+                    ind.setAttributeNS(W_NS, "w:firstLine", "0");
+                    ind.removeAttributeNS(W_NS, "hanging");
+
+                    const runs = Array.from(p.getElementsByTagNameNS(W_NS, "r"));
+                    
+                    if (isHeaderRow) {
+                        const fullText = p.textContent || "";
+                        const hasLetters = /[A-ZÀ-Ỹa-zà-ỹ]/.test(fullText);
+                        
+                        if (hasLetters) {
+                            const cleanT = normalizeTableHeader(fullText);
+                            
+                            Array.from(p.childNodes).forEach(child => {
+                                if (child.nodeName !== "w:pPr") p.removeChild(child);
+                            });
+                            
+                            const r = doc.createElementNS(W_NS, "w:r");
+                            const rPr = doc.createElementNS(W_NS, "w:rPr");
+                            r.appendChild(rPr);
+                            
+                            const b = doc.createElementNS(W_NS, "w:b");
+                            b.setAttributeNS(W_NS, "w:val", "true"); 
+                            rPr.appendChild(b);
+                            
+                            const sz = doc.createElementNS(W_NS, "w:sz");
+                            sz.setAttributeNS(W_NS, "w:val", "26"); 
+                            rPr.appendChild(sz);
+                            const szCs = doc.createElementNS(W_NS, "w:szCs");
+                            szCs.setAttributeNS(W_NS, "w:val", "26");
+                            rPr.appendChild(szCs);
+                            
+                            const t = doc.createElementNS(W_NS, "w:t");
+                            t.textContent = cleanT;
+                            r.appendChild(t);
+                            p.appendChild(r);
+                        } else {
+                            for (const r of runs) {
+                                const rPr = getOrCreate(r, "w:rPr");
+                                const b = getOrCreate(rPr, "w:b");
+                                b.setAttributeNS(W_NS, "w:val", "true");
+                                const sz = getOrCreate(rPr, "w:sz");
+                                sz.setAttributeNS(W_NS, "w:val", "26");
+                                const szCs = getOrCreate(rPr, "w:szCs");
+                                szCs.setAttributeNS(W_NS, "w:val", "26");
+                            }
+                        }
+                    } else {
+                        for (const r of runs) {
+                            const rPr = getOrCreate(r, "w:rPr");
+                            const sz = getOrCreate(rPr, "w:sz");
+                            sz.setAttributeNS(W_NS, "w:val", "26"); 
+                            const szCs = getOrCreate(rPr, "w:szCs");
+                            szCs.setAttributeNS(W_NS, "w:val", "26");
+                        }
+                    }
+                }
+                logicalColIndex += gridSpan;
             }
         }
     }
@@ -706,10 +859,6 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
     return { success: false, error: error instanceof Error ? error.message : "Unknown error", logs };
   }
 };
-
-// ====================================================
-// ============= TEMPLATE CREATORS ====================
-// ====================================================
 
 const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
     const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -925,6 +1074,7 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
     tc1W.setAttributeNS(W_NS, "w:w", "3800");
     tc1W.setAttributeNS(W_NS, "w:type", "dxa");
     
+    // ĐÃ SỬA LỖI TYPO tc1Mar Ở ĐÂY
     const tc1Mar = getOrCreate(tc1Pr, "w:tcMar");
     ["top", "bottom", "left", "right"].forEach(side => {
         const mar = getOrCreate(tc1Mar, `w:${side}`);
@@ -954,10 +1104,17 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
 
     switch (options.headerType) {
         case HeaderType.PARTY:
+            let partySymbolStr = "Số: ... - .../CB";
+            if (options.docSymbol || options.docSuffix) {
+                const symbol = options.docSymbol || "...";
+                const suffix = options.docSuffix || "CB";
+                partySymbolStr = `Số: ... - ${symbol}/${suffix}`;
+            }
+
             tc1.appendChild(createStyledP("ĐẢNG BỘ XÃ EA KAR", false, false));
             tc1.appendChild(createStyledP("CHI BỘ TRƯỜNG THCS CHU VĂN AN", true, false));
             tc1.appendChild(createStyledP("*", false, false)); 
-            tc1.appendChild(createStyledP("Số: ... - .../CB", false, false));
+            tc1.appendChild(createStyledP(partySymbolStr, false, false));
 
             tc2.appendChild(createMottoP("ĐẢNG CỘNG SẢN VIỆT NAM", true, 13)); 
             appendSafeTable(tc2, createMottoLineTable("3400")); 
@@ -982,11 +1139,18 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
 
         case HeaderType.SCHOOL:
         default:
+            let schoolSymbolStr = "Số: ... /...";
+            if (options.docSymbol || options.docSuffix) {
+                const symbol = options.docSymbol || "...";
+                const suffix = options.docSuffix || "...";
+                schoolSymbolStr = `Số: ... /${symbol}-${suffix}`;
+            }
+
             tc1.appendChild(createStyledP("UBND XÃ EA KAR", false, false));
             tc1.appendChild(createStyledP("TRƯỜNG THCS CHU VĂN AN", true, false));
             appendSafeTable(tc1, createShortLineTable());
             tc1.appendChild(createStyledP("", false, false));
-            tc1.appendChild(createStyledP("Số: ... /...", false, false));
+            tc1.appendChild(createStyledP(schoolSymbolStr, false, false));
 
             tc2.appendChild(createStyledP("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", true, false, 13));
             tc2.appendChild(createMottoP("Độc lập - Tự do - Hạnh phúc", true, 13)); 
