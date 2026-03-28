@@ -100,7 +100,7 @@ const isParagraphBold = (p: Element): boolean => {
 };
 
 const enforceSchema = (doc: Document) => {
-    const orders: Record<string, string[]> = {
+    const schema: Record<string, string[]> = {
         "w:pPr": [
             "w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr", "w:widowControl", 
             "w:numPr", "w:suppressLineNumbers", "w:pBdr", "w:shd", "w:tabs", "w:suppressAutoHyphens", 
@@ -129,31 +129,43 @@ const enforceSchema = (doc: Document) => {
             "w:cnfStyle", "w:tcW", "w:gridSpan", "w:hMerge", "w:vMerge", "w:tcBorders", "w:shd", "w:noWrap", 
             "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark", "w:headers", "w:cellIns", 
             "w:cellDel", "w:tcPrChange"
-        ],
-        "w:r": [
-            "w:rPr", "w:t", "w:br", "w:tab", "w:drawing", "w:pict", "w:object", "w:sym", "w:fldChar", 
-            "w:instrText", "w:delText", "w:insText"
         ]
     };
 
-    Object.keys(orders).forEach(tagName => {
+    Object.keys(schema).forEach(tagName => {
         const localName = tagName.split(":")[1];
         const elements = Array.from(doc.getElementsByTagNameNS(W_NS, localName));
-        elements.forEach(el => {
-            const order = orders[tagName];
-            const children = Array.from(el.childNodes);
-            children.sort((a, b) => {
-                const nameA = a.nodeName.includes(":") ? a.nodeName : `w:${a.nodeName}`;
-                const nameB = b.nodeName.includes(":") ? b.nodeName : `w:${b.nodeName}`;
-                const indexA = order.indexOf(nameA);
-                const indexB = order.indexOf(nameB);
 
-                if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-                if (indexA === -1 && indexB !== -1) return -1;
-                if (indexA !== -1 && indexB === -1) return 1;
-                return 0;
+        elements.forEach(el => {
+            const order = schema[tagName];
+            const elementsMap = new Map<string, Element[]>();
+            const unknownElements: Element[] = [];
+
+            Array.from(el.childNodes).forEach(child => {
+                if (child.nodeType === 1) { 
+                    const childName = child.nodeName.includes(":") ? child.nodeName : `w:${child.nodeName}`;
+                    if (order.includes(childName)) {
+                        if (!elementsMap.has(childName)) elementsMap.set(childName, []);
+                        elementsMap.get(childName)!.push(child as Element);
+                    } else {
+                        unknownElements.push(child as Element);
+                    }
+                }
             });
-            children.forEach(c => el.appendChild(c));
+
+            Array.from(el.childNodes).forEach(child => {
+                if (child.nodeType === 1) {
+                    el.removeChild(child);
+                }
+            });
+
+            order.forEach(childName => {
+                if (elementsMap.has(childName)) {
+                    elementsMap.get(childName)!.forEach(childEl => el.appendChild(childEl));
+                }
+            });
+
+            unknownElements.forEach(childEl => el.appendChild(childEl));
         });
     });
 };
@@ -179,7 +191,11 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
       let child = parent.getElementsByTagNameNS(W_NS, localName)[0];
       if (!child) {
         child = doc.createElementNS(W_NS, tagName);
-        parent.appendChild(child);
+        if (tagName.endsWith("Pr") && parent.firstChild) {
+            parent.insertBefore(child, parent.firstChild);
+        } else {
+            parent.appendChild(child);
+        }
       }
       return child;
     };
@@ -207,7 +223,12 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                            p.getElementsByTagNameNS(W_NS, "pict").length > 0 || 
                            p.getElementsByTagNameNS(W_NS, "object").length > 0 || 
                            p.getElementsByTagNameNS(W_NS, "br").length > 0;
-        if (!hasContent && fullText.length === 0) p.parentNode?.removeChild(p);
+        
+        if (!hasContent && fullText.length === 0) {
+            if (!isTableParagraph(p)) {
+                p.parentNode?.removeChild(p);
+            }
+        }
     }
 
     if (options.removeNumbering) {
@@ -310,18 +331,22 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         const jcTbl = doc.createElementNS(W_NS, "w:jc");
         jcTbl.setAttributeNS(W_NS, "w:val", "center");
         tblPr.appendChild(jcTbl);
+        
         const tblW = doc.createElementNS(W_NS, "w:tblW");
         tblW.setAttributeNS(W_NS, "w:w", "1500");
         tblW.setAttributeNS(W_NS, "w:type", "dxa");
-        tblPr.appendChild(tblW);
+        tblPr.appendChild(tblW); 
+        
         const tblLayout = doc.createElementNS(W_NS, "w:tblLayout");
         tblLayout.setAttributeNS(W_NS, "w:type", "fixed");
         tblPr.appendChild(tblLayout);
+        
         const tblGrid = doc.createElementNS(W_NS, "w:tblGrid");
         const gridCol = doc.createElementNS(W_NS, "w:gridCol");
         gridCol.setAttributeNS(W_NS, "w:w", "1500");
         tblGrid.appendChild(gridCol);
         tbl.appendChild(tblGrid);
+        
         const tr = doc.createElementNS(W_NS, "w:tr");
         tbl.appendChild(tr);
         const trPr = doc.createElementNS(W_NS, "w:trPr");
@@ -330,6 +355,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         trHeight.setAttributeNS(W_NS, "w:hRule", "exact");
         trPr.appendChild(trHeight);
         tr.appendChild(trPr);
+        
         const tc = doc.createElementNS(W_NS, "w:tc");
         tr.appendChild(tc);
         const tcPr = doc.createElementNS(W_NS, "w:tcPr");
@@ -356,6 +382,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         top.setAttributeNS(W_NS, "w:color", "000000");
         tcBorders.appendChild(top);
         tcPr.appendChild(tcBorders);
+        
         const p = doc.createElementNS(W_NS, "w:p");
         const pPr = doc.createElementNS(W_NS, "w:pPr");
         p.appendChild(pPr);
@@ -368,6 +395,7 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         tc.appendChild(p);
         protectedElements.add(p);
         frag.appendChild(tbl);
+        
         const safeP = doc.createElementNS(W_NS, "w:p");
         const safePPr = doc.createElementNS(W_NS, "w:pPr");
         safeP.appendChild(safePPr);
@@ -469,6 +497,12 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                     
                     if (tempText.startsWith("Căn cứ") || tempText.startsWith("Xét") || tempText.startsWith("Theo") || tempText.startsWith("Kính gửi") || tempText.startsWith("Hôm nay") || tempText.startsWith("Thời gian:") || tempText.startsWith("Đồng kính gửi")) break;
                     
+                    // --- BẢO VỆ CHỨC NĂNG QUYẾT ĐỊNH THÔNG MINH ---
+                    // Chặn việc gom nhầm Thẩm quyền ban hành (HIỆU TRƯỞNG...) vào Trích yếu
+                    if (upperText.startsWith("HIỆU TRƯỞNG") || upperText.startsWith("GIÁM ĐỐC") || upperText.startsWith("CHỦ TỊCH") || upperText.startsWith("QUYẾT ĐỊNH")) {
+                        break;
+                    }
+                    
                     if (/^([IVXLCDM]+|[0-9]+)[\.\)]\s/.test(tempText)) break;
                     if (tempText.length > 250) break; 
 
@@ -559,6 +593,18 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
         continue; 
       }
 
+      const lowerPText = pText.toLowerCase().replace(/^[\-\+*•\s]+/, '');
+      const isBasisLine = lowerPText.startsWith("căn cứ") || lowerPText.startsWith("xét") || lowerPText.startsWith("theo");
+      
+      let isItalicBasis = false;
+      if (isBasisLine) {
+          if (detectedDocType === "QUYẾT ĐỊNH" || detectedDocType === "NGHỊ QUYẾT") {
+              isItalicBasis = true; 
+          } else {
+              isItalicBasis = false; 
+          }
+      }
+
       const jc = getOrCreate(pPr, "w:jc");
       jc.setAttributeNS(W_NS, "w:val", "both");
       const spacing = getOrCreate(pPr, "w:spacing");
@@ -579,6 +625,18 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
           sz.setAttributeNS(W_NS, "w:val", String(targetSize));
           const szCs = getOrCreate(rPr, "w:szCs");
           szCs.setAttributeNS(W_NS, "w:val", String(targetSize));
+
+          if (isBasisLine) {
+              const iEl = getOrCreate(rPr, "w:i");
+              iEl.setAttributeNS(W_NS, "w:val", isItalicBasis ? "true" : "false");
+              const iCsEl = getOrCreate(rPr, "w:iCs");
+              iCsEl.setAttributeNS(W_NS, "w:val", isItalicBasis ? "true" : "false");
+              
+              const bEl = getOrCreate(rPr, "w:b");
+              bEl.setAttributeNS(W_NS, "w:val", "false");
+              const bCsEl = getOrCreate(rPr, "w:bCs");
+              bCsEl.setAttributeNS(W_NS, "w:val", "false");
+          }
       }
     }
 
@@ -745,7 +803,11 @@ export const processDocx = async (file: File, options: DocxOptions = DEFAULT_OPT
                 let child = parent.getElementsByTagNameNS(W_NS, localName)[0];
                 if (!child) {
                     child = extDoc.createElementNS(W_NS, tagName);
-                    parent.appendChild(child);
+                    if (tagName.endsWith("Pr") && parent.firstChild) {
+                        parent.insertBefore(child, parent.firstChild);
+                    } else {
+                        parent.appendChild(child);
+                    }
                 }
                 return child;
             };
@@ -868,7 +930,11 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
       let child = parent.getElementsByTagNameNS(W_NS, localName)[0];
       if (!child) {
         child = doc.createElementNS(W_NS, tagName);
-        parent.appendChild(child);
+        if (tagName.endsWith("Pr") && parent.firstChild) {
+            parent.insertBefore(child, parent.firstChild);
+        } else {
+            parent.appendChild(child);
+        }
       }
       return child;
     };
@@ -1074,7 +1140,6 @@ const createHeaderTemplate = (doc: Document, options: DocxOptions): Element => {
     tc1W.setAttributeNS(W_NS, "w:w", "3800");
     tc1W.setAttributeNS(W_NS, "w:type", "dxa");
     
-    // ĐÃ SỬA LỖI TYPO tc1Mar Ở ĐÂY
     const tc1Mar = getOrCreate(tc1Pr, "w:tcMar");
     ["top", "bottom", "left", "right"].forEach(side => {
         const mar = getOrCreate(tc1Mar, `w:${side}`);
@@ -1171,7 +1236,11 @@ const createSignatureBlock = (doc: Document, options: any, docType: string): Ele
       let child = parent.getElementsByTagNameNS(W_NS, localName)[0];
       if (!child) {
         child = doc.createElementNS(W_NS, tagName);
-        parent.appendChild(child);
+        if (tagName.endsWith("Pr") && parent.firstChild) {
+            parent.insertBefore(child, parent.firstChild);
+        } else {
+            parent.appendChild(child);
+        }
       }
       return child;
     };
