@@ -10,6 +10,48 @@ import {
   Settings2, Zap, ArrowRight, Database, SlidersHorizontal, ChevronDown, ChevronUp, CheckSquare, ListX
 } from 'lucide-react';
 
+const hanhChinhSymbols = [
+  { name: "Nghị quyết", value: "NQ" }, 
+  { name: "Quyết định", value: "QĐ" },
+  { name: "Quy chế", value: "QC" }, 
+  { name: "Quy định", value: "QyĐ" },
+  { name: "Thông báo", value: "TB" }, 
+  { name: "Hướng dẫn", value: "HD" },
+  { name: "Chương trình", value: "CTr" }, 
+  { name: "Kế hoạch", value: "KH" },
+  { name: "Phương án", value: "PA" }, 
+  { name: "Đề án", value: "ĐA" },
+  { name: "Dự án", value: "DA" }, 
+  { name: "Báo cáo", value: "BC" },
+  { name: "Biên bản", value: "BB" }, 
+  { name: "Tờ trình", value: "TTr" },
+  { name: "Hợp đồng", value: "HĐ" }, 
+  { name: "Bản thỏa thuận", value: "BTT" },
+  { name: "Giấy ủy quyền", value: "GUQ" }, 
+  { name: "Giấy mời", value: "GM" },
+  { name: "Giấy giới thiệu", value: "GGT" }, 
+  { name: "Giấy nghỉ phép", value: "GNP" },
+  { name: "Công văn", value: "CV" }
+];
+
+const dangSymbols = [
+  { name: "Nghị quyết", value: "NQ" }, 
+  { name: "Quyết định", value: "QĐ" },
+  { name: "Chỉ thị", value: "CT" }, 
+  { name: "Kết luận", value: "KL" },
+  { name: "Quy chế", value: "QC" }, 
+  { name: "Quy định", value: "QyĐ" },
+  { name: "Hướng dẫn", value: "HD" }, 
+  { name: "Báo cáo", value: "BC" },
+  { name: "Kế hoạch", value: "KH" }, 
+  { name: "Chương trình", value: "CTr" },
+  { name: "Thông báo", value: "TB" }, 
+  { name: "Thông tri", value: "TTr" },
+  { name: "Công văn", value: "CV" }, 
+  { name: "Tờ trình", value: "TTr" },
+  { name: "Biên bản", value: "BB" }
+];
+
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<ProcessingStatus>(ProcessingStatus.IDLE);
@@ -31,7 +73,9 @@ export default function App() {
     signerName: "",
     isMinutes: false,
     presiderName: "",
-    secretaryName: ""
+    secretaryName: "",
+    docSymbol: "",
+    docSuffix: ""
   });
 
   const isUploadDisabled = options.isMinutes 
@@ -166,6 +210,39 @@ export default function App() {
                             </select>
                             <p className="text-[10px] text-slate-400">Tự động chèn bảng thông tin cơ quan và Quốc hiệu vào đầu trang theo mẫu đã chọn</p>
                             
+                            {/* NEW: Conditional Document Symbol & Suffix */}
+                            {(options.headerType === HeaderType.SCHOOL || options.headerType === HeaderType.PARTY) && (
+                                <div className="mt-4 animate-fadeIn border-t border-slate-100 pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">
+                                            Ký hiệu văn bản
+                                        </label>
+                                        <select 
+                                            value={options.docSymbol || ""}
+                                            onChange={(e) => setOptions({...options, docSymbol: e.target.value})}
+                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-slate-700"
+                                        >
+                                            <option value="">--- Chọn ký hiệu ---</option>
+                                            {(options.headerType === HeaderType.SCHOOL ? hanhChinhSymbols : dangSymbols).map(sym => (
+                                                <option key={sym.value} value={sym.value}>{sym.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">
+                                            Hậu tố cơ quan
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            placeholder={options.headerType === HeaderType.SCHOOL ? "Nhập hậu tố, vd: THCSCVA" : "Nhập hậu tố, vd: CB"}
+                                            value={options.docSuffix || ""}
+                                            onChange={(e) => setOptions({...options, docSuffix: e.target.value.toUpperCase()})}
+                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             {/* NEW: Conditional Department Select */}
                             {options.headerType === HeaderType.DEPARTMENT && (
                                 <div className="mt-4 animate-fadeIn border-t border-slate-100 pt-4">

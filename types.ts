@@ -49,4 +49,6 @@ export interface DocxOptions {
   isMinutes?: boolean;
   presiderName?: string;
   secretaryName?: string;
+  docSymbol?: string;
+  docSuffix?: string;
 }
